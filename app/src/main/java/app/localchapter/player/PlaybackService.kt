@@ -2,8 +2,6 @@ package app.localchapter.player
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.media.MediaMetadataRetriever
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -144,7 +142,7 @@ class PlaybackService : MediaSessionService() {
         resolvingSkip = true
         durationReader.execute {
             val resolved = resolveChapterSkip(start, offset, tracks.size) { chapter ->
-                knownDuration(chapter) ?: readDuration(tracks[chapter].uri)
+                knownDuration(chapter) ?: readTrackDuration(this, tracks[chapter].uri)
             }
             handler.post {
                 if (request != skipRequest) return@post
@@ -156,17 +154,6 @@ class PlaybackService : MediaSessionService() {
             }
         }
     }
-
-    private fun readDuration(uri: String): Long? = runCatching {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(this, Uri.parse(uri))
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull()?.takeIf { it > 0 }
-        } finally {
-            retriever.release()
-        }
-    }.getOrNull()
 
     private fun savePosition() {
         val book = currentBook ?: return

@@ -16,10 +16,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
-import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -35,6 +36,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 class MainActivity : Activity() {
     private companion object {
@@ -51,6 +54,8 @@ class MainActivity : Activity() {
     private val foreground by lazy { getColor(R.color.player_text) }
     private val selectedSurface by lazy { getColor(R.color.player_selected) }
     private val handler = Handler(Looper.getMainLooper())
+    private val chapterDurationReader = Executors.newSingleThreadExecutor()
+    private var chapterDurationTask: Future<*>? = null
     private lateinit var library: Library
     private lateinit var updates: GitHubUpdates
     private val updatePreferences by lazy { getSharedPreferences("updates", MODE_PRIVATE) }
@@ -149,6 +154,11 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        chapterDurationReader.shutdownNow()
+        super.onDestroy()
+    }
+
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (book == null) super.onBackPressed()
@@ -161,6 +171,7 @@ class MainActivity : Activity() {
     private fun mainExecutorCompat() = java.util.concurrent.Executor { runnable -> handler.post(runnable) }
 
     private fun render() {
+        chapterDurationTask?.cancel(true)
         dragging = false
         controls = null
         updateButton = null
@@ -319,8 +330,8 @@ class MainActivity : Activity() {
     }
 
     private fun chapterList(book: Book): ListView {
-        val titles = book.tracks.map { "${it.filename.substringBefore(" - ")}    ${it.title}" }
-        return ListView(this).apply {
+        val durations = arrayOfNulls<String>(book.tracks.size)
+        val list = ListView(this).apply {
             choiceMode = ListView.CHOICE_MODE_SINGLE
             isNestedScrollingEnabled = true
             background = GradientDrawable().apply {
@@ -331,20 +342,60 @@ class MainActivity : Activity() {
             clipToOutline = true
             divider = android.graphics.drawable.ColorDrawable(border)
             dividerHeight = dp(1)
-            adapter = object : ArrayAdapter<String>(this@MainActivity, android.R.layout.simple_list_item_1, titles) {
-                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
-                    (super.getView(position, convertView, parent) as TextView).apply {
-                        setTextColor(this@MainActivity.foreground)
-                        textSize = 16f
-                        minHeight = dp(52)
-                        background = android.graphics.drawable.StateListDrawable().apply {
-                            addState(intArrayOf(android.R.attr.state_activated),
-                                android.graphics.drawable.ColorDrawable(selectedSurface))
-                            addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-                        }
+            adapter = object : BaseAdapter() {
+                override fun getCount() = book.tracks.size
+                override fun getItem(position: Int) = book.tracks[position]
+                override fun getItemId(position: Int) = position.toLong()
+
+                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                    val track = getItem(position)
+                    return ((convertView as? ChapterRow) ?: ChapterRow()).apply {
+                        tag = position
+                        title.text = "${track.filename.substringBefore(" - ")}    ${track.title}"
+                        duration.text = durations[position] ?: "—"
                     }
+                }
             }
             setOnItemClickListener { _, _, index, _ -> open(book, index, true) }
+        }
+        chapterDurationTask = chapterDurationReader.submit {
+            for ((index, track) in book.tracks.withIndex()) {
+                if (Thread.currentThread().isInterrupted) break
+                val duration = readTrackDuration(applicationContext, track.uri) ?: continue
+                val text = time(duration)
+                handler.post {
+                    if (isDestroyed) return@post
+                    durations[index] = text
+                    val row = list.getChildAt(index - list.firstVisiblePosition) as? ChapterRow
+                    if (row?.tag == index) row.duration.text = text
+                }
+            }
+        }
+        return list
+    }
+
+    private inner class ChapterRow : LinearLayout(this@MainActivity) {
+        val title = label("", 16f, this@MainActivity.foreground).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val duration = label("", 14f, muted).apply {
+            gravity = Gravity.END
+            fontFeatureSettings = "tnum"
+            minWidth = dp(44)
+        }
+
+        init {
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            setPaddingRelative(dp(16), dp(6), dp(16), dp(6))
+            background = android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_activated),
+                    android.graphics.drawable.ColorDrawable(selectedSurface))
+                addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            }
+            addView(title, LayoutParams(0, -2, 1f))
+            addView(duration, LayoutParams(-2, -2).apply { marginStart = dp(12) })
         }
     }
 

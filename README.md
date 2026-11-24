@@ -29,7 +29,7 @@ In Local Chapter, tap **Import folder**, select the book’s folder, and grant a
 
 ## Listen
 
-Tap a chapter in the list to start it, or tap **Play** to resume your saved position. Use the seek bar, previous and next chapter buttons, or 30-second skips to navigate. Playback speed and the sleep timer are below the controls.
+Each chapter’s length is shown on the right. Tap a chapter to start it, or tap **Play** to resume your saved position. Use the seek bar, previous and next chapter buttons, or 30-second skips to navigate. Playback speed and the sleep timer are below the controls.
 
 The 30-second skips carry across chapter boundaries. If you skip back 30 seconds from 15 seconds into a chapter, playback moves to 15 seconds before the end of the previous chapter.
 
