@@ -1,0 +1,15 @@
+<resources>
+    <color name="player_background">#FCFCFC</color>
+    <color name="player_surface">#F4F4F5</color>
+    <color name="player_border">#E4E4E7</color>
+    <color name="player_text">#27272A</color>
+    <color name="player_muted">#6F6F79</color>
+    <color name="player_accent">#1B4ED8</color>
+    <color name="player_selected">#E0E6F7</color>
+    <style name="PlayerTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/player_accent</item>
+        <item name="android:windowBackground">@color/player_background</item>
+        <item name="android:statusBarColor">@color/player_background</item>
+        <item name="android:navigationBarColor">@color/player_background</item>
+    </style>
+</resources>

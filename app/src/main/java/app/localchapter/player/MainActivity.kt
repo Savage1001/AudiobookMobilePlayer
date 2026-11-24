@@ -43,11 +43,13 @@ class MainActivity : Activity() {
         const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
     }
 
-    private val background = Color.rgb(18, 26, 25)
-    private val surface = Color.rgb(32, 50, 46)
-    private val mint = Color.rgb(196, 243, 219)
-    private val muted = Color.rgb(185, 209, 200)
-    private val white = Color.rgb(245, 251, 248)
+    private val background by lazy { getColor(R.color.player_background) }
+    private val surface by lazy { getColor(R.color.player_surface) }
+    private val border by lazy { getColor(R.color.player_border) }
+    private val accent by lazy { getColor(R.color.player_accent) }
+    private val muted by lazy { getColor(R.color.player_muted) }
+    private val foreground by lazy { getColor(R.color.player_text) }
+    private val selectedSurface by lazy { getColor(R.color.player_selected) }
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var library: Library
     private lateinit var updates: GitHubUpdates
@@ -78,8 +80,9 @@ class MainActivity : Activity() {
     }
 
     private data class Controls(
-        val chapter: TextView, val times: TextView, val seek: SeekBar, val play: Button,
-        val speed: Button, val timer: Button, val previous: Button, val next: Button
+        val chapter: TextView, val elapsed: TextView, val remaining: TextView, val seek: SeekBar,
+        val play: android.widget.ImageButton, val speed: Button, val timer: Button,
+        val previous: View, val next: View, val rewind: View, val forward: View, val chapters: ListView
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -174,6 +177,10 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
         window.statusBarColor = background
         window.navigationBarColor = background
+        val light = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK !=
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        window.decorView.systemUiVisibility = if (light) View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0
         setContentView(root)
         root.requestApplyInsets()
         val selected = book
@@ -185,7 +192,7 @@ class MainActivity : Activity() {
     private fun renderLibrary() {
         val page = column().apply { setPadding(dp(22), dp(24), dp(22), dp(22)) }
         root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        page.addView(label("Local Chapter", 35f, white, bold = true))
+        page.addView(label("Local Chapter", 35f, foreground, bold = true))
         page.addView(label("Your audiobook library", 16f, muted))
         page.addView(button(if (importing) "Scanning folder…" else "＋ Import folder", primary = true) { pickFolder() }
             .apply { isEnabled = !importing }, spaced(top = 22, bottom = 18))
@@ -211,40 +218,82 @@ class MainActivity : Activity() {
     }
 
     private fun renderBook(book: Book) {
-        val header = column().apply { setPadding(dp(18), dp(8), dp(18), dp(8)) }
-        header.addView(row().apply {
-            addView(button("‹ Library") { this@MainActivity.book = null; render() }, weighted())
-            addView(button("Rename") { rename(book) }, weighted())
+        val compact = resources.configuration.screenHeightDp < 650 || resources.configuration.fontScale > 1.25f
+        val page = column().apply { setPadding(dp(20), dp(6), dp(20), dp(12)) }
+        if (compact) root.addView(ScrollView(this).apply { isFillViewport = true; addView(page) },
+            LinearLayout.LayoutParams(-1, 0, 1f))
+        else root.addView(page, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        page.addView(row().apply {
+            addView(button("‹ Library") { this@MainActivity.book = null; render() }
+                .apply { setPadding(dp(12), 0, dp(12), 0) })
+            addView(label(book.title, 16f, this@MainActivity.foreground, bold = true).apply {
+                gravity = Gravity.CENTER
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(dp(8), 0, dp(8), 0)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(button("⋯") { showBookOptions(book) }.apply {
+                contentDescription = "Book options"
+                textSize = 20f
+            },
+                LinearLayout.LayoutParams(dp(48), dp(48)))
         })
-        header.addView(label(book.title, 29f, white, bold = true).apply { maxLines = 2 }, spaced(top = 10))
-        val chapter = label("", 17f, mint, bold = true).apply { maxLines = 2 }
-        header.addView(chapter, spaced(top = 4))
+
+        page.addView(label("Chapters · ${book.tracks.size}", 14f, muted, bold = true), spaced(top = 12, bottom = 6))
+        val chapters = chapterList(book)
+        page.addView(chapters, if (compact) LinearLayout.LayoutParams(-1, dp(190))
+            else LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val chapter = label("", 23f, foreground, bold = true).apply {
+            gravity = Gravity.CENTER
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        page.addView(chapter, spaced(top = 8))
+
         val seek = SeekBar(this).apply {
             max = 1000
-            progressTintList = ColorStateList.valueOf(mint)
-            thumbTintList = ColorStateList.valueOf(mint)
-            contentDescription = "Track position"
+            progressTintList = ColorStateList.valueOf(accent)
+            progressBackgroundTintList = ColorStateList.valueOf(border)
+            thumbTintList = ColorStateList.valueOf(accent)
+            contentDescription = "Chapter position"
         }
-        header.addView(seek, LinearLayout.LayoutParams(-1, dp(42)))
-        val times = label("", 13f, muted)
-        header.addView(times)
-        val previous = button("‹ Track") { active()?.seekToPreviousMediaItem() }
-        val next = button("Track ›") { active()?.seekToNextMediaItem() }
-        val play = button("Play", primary = true) { toggle(book) }
-        header.addView(row().apply {
-            addView(button("−30s") { active()?.seekBack() }, weighted())
-            addView(play, weighted())
-            addView(button("+30s") { active()?.seekForward() }, weighted())
-        }, spaced(top = 6))
+        page.addView(seek, LinearLayout.LayoutParams(-1, dp(40)))
+        val elapsed = label("", 14f, muted)
+        val remaining = label("", 14f, muted).apply { gravity = Gravity.END }
+        page.addView(row().apply {
+            setPadding(dp(12), 0, dp(12), 0)
+            addView(elapsed, weighted())
+            addView(remaining, weighted())
+        })
+
+        val previous = transportIcon(R.drawable.ic_previous, "Previous chapter") { active()?.seekToPreviousMediaItem() }
+        val next = transportIcon(R.drawable.ic_next, "Next chapter") { active()?.seekToNextMediaItem() }
+        val play = transportIcon(R.drawable.ic_play, "Play", primary = true) { toggle(book) }
+        val rewind = button("−30") { active()?.seekBack() }.apply { contentDescription = "Back 30 seconds" }
+        val forward = button("+30") { active()?.seekForward() }.apply { contentDescription = "Forward 30 seconds" }
+        page.addView(row().apply {
+            gravity = Gravity.CENTER
+            addView(previous, transportSlot())
+            addView(rewind, transportSlot())
+            addView(play, LinearLayout.LayoutParams(dp(68), dp(60)).apply {
+                marginStart = dp(6)
+                marginEnd = dp(6)
+            })
+            addView(forward, transportSlot())
+            addView(next, transportSlot())
+        }, spaced(top = 14))
+
         val speed = button("Speed") { chooseSpeed() }
-        val timer = button("Sleep") { chooseTimer() }
-        header.addView(row().apply {
-            addView(previous, weighted())
-            addView(speed, weighted())
-            addView(timer, weighted())
-            addView(next, weighted())
-        }, spaced(top = 4))
-        controls = Controls(chapter, times, seek, play, speed, timer, previous, next)
+        val timer = button("Sleep timer") { chooseTimer() }
+        page.addView(row().apply {
+            addView(speed, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+            addView(timer, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
+        }, spaced(top = 12))
+
+        controls = Controls(chapter, elapsed, remaining, seek, play, speed, timer, previous, next, rewind, forward, chapters)
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(bar: SeekBar) { dragging = true }
             override fun onStopTrackingTouch(bar: SeekBar) {
@@ -254,34 +303,73 @@ class MainActivity : Activity() {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser && !dragging) applySeek(progress)
                 if (fromUser && dragging) active()?.let { player ->
-                    times.text = "${time(player.duration * progress / 1000)}  /  ${time(player.duration)}"
+                    updateTimes(elapsed, remaining, player.duration * progress / 1000, player.duration)
                 }
             }
         })
+    }
+
+
+    private fun showBookOptions(book: Book) {
         val warnings = TrackOrder.warnings(book.tracks)
-        header.addView(row().apply {
-            addView(label("Tracks · ${book.tracks.size}", 17f, white, bold = true), weighted())
-            if (warnings.isNotEmpty()) addView(button("Numbering details") { showWarnings(warnings) }, weighted())
-        }, spaced(top = 8))
+        val choices = if (warnings.isEmpty()) arrayOf("Rename book") else arrayOf("Rename book", "Numbering details")
+        AlertDialog.Builder(this).setTitle(book.title).setItems(choices) { _, index ->
+            if (index == 0) rename(book) else showWarnings(warnings)
+        }.show()
+    }
+
+    private fun chapterList(book: Book): ListView {
         val titles = book.tracks.map { "${it.filename.substringBefore(" - ")}    ${it.title}" }
-        val list = ListView(this).apply {
+        return ListView(this).apply {
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            isNestedScrollingEnabled = true
+            background = GradientDrawable().apply {
+                setColor(surface)
+                setStroke(dp(1), border)
+                cornerRadius = dp(14).toFloat()
+            }
+            clipToOutline = true
+            divider = android.graphics.drawable.ColorDrawable(border)
+            dividerHeight = dp(1)
             adapter = object : ArrayAdapter<String>(this@MainActivity, android.R.layout.simple_list_item_1, titles) {
                 override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
                     (super.getView(position, convertView, parent) as TextView).apply {
-                        setTextColor(white)
+                        setTextColor(this@MainActivity.foreground)
                         textSize = 16f
+                        minHeight = dp(52)
+                        background = android.graphics.drawable.StateListDrawable().apply {
+                            addState(intArrayOf(android.R.attr.state_activated),
+                                android.graphics.drawable.ColorDrawable(selectedSurface))
+                            addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+                        }
                     }
             }
             setOnItemClickListener { _, _, index, _ -> open(book, index, true) }
         }
-        val scroller = ScrollView(this).apply { addView(header) }
-        root.addView(scroller, LinearLayout.LayoutParams(-1, -2).apply {
-            if (resources.configuration.screenHeightDp < 570) {
-                height = 0
-                weight = 1.5f
-            }
-        })
-        root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+    }
+
+    private fun transportSlot() = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+        marginStart = dp(3)
+        marginEnd = dp(3)
+    }
+
+    private fun transportIcon(icon: Int, description: String, primary: Boolean = false, action: () -> Unit) =
+        android.widget.ImageButton(this).apply {
+            setImageResource(icon)
+            contentDescription = description
+            imageTintList = ColorStateList(
+                arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+                intArrayOf(muted, if (primary) Color.WHITE else this@MainActivity.foreground)
+            )
+            background = buttonBackground(primary)
+            setOnClickListener { action() }
+        }
+
+    private fun updateTimes(elapsed: TextView, remaining: TextView, position: Long, duration: Long) {
+        val elapsedText = time(position)
+        val remainingText = if (duration > 0) "−${time(duration - position)}" else "—"
+        if (elapsed.text != elapsedText) elapsed.text = elapsedText
+        if (remaining.text != remainingText) remaining.text = remainingText
     }
 
     private fun applySeek(progress: Int) {
@@ -300,24 +388,40 @@ class MainActivity : Activity() {
         val views = controls ?: return
         val player = active()
         val saved = if (player == null) library.bookmark(selected.id) else null
-        val track = if (player != null) selected.tracks.getOrNull(player.currentMediaItemIndex)
-            else selected.tracks.find { it.uri == saved?.uri } ?: selected.tracks.firstOrNull()
+        val index = player?.currentMediaItemIndex
+            ?: selected.tracks.indexOfFirst { it.uri == saved?.uri }.coerceAtLeast(0)
+        val title = selected.tracks.getOrNull(index)?.title.orEmpty()
         val position = player?.currentPosition ?: saved?.position ?: 0
         val duration = player?.duration ?: 0
-        views.chapter.text = track?.title.orEmpty()
+        if (views.chapter.text != title) views.chapter.text = title
+        if (views.chapters.checkedItemPosition != index) {
+            views.chapters.setItemChecked(index, true)
+            if (index !in views.chapters.firstVisiblePosition..views.chapters.lastVisiblePosition) {
+                views.chapters.setSelection(index)
+            }
+        }
         if (!dragging) {
-            views.times.text = if (duration > 0) "${time(position)}  /  ${time(duration)}" else time(position)
+            updateTimes(views.elapsed, views.remaining, position, duration)
             views.seek.progress = if (duration > 0) (position * 1000 / duration).toInt() else 0
         }
         views.seek.isEnabled = duration > 0
         views.play.isEnabled = controller != null
-        views.play.text = if (player?.playWhenReady == true && player.playbackState != Player.STATE_ENDED
-            && player.playbackState != Player.STATE_IDLE) "Pause" else "Play"
-        views.speed.text = "${player?.playbackParameters?.speed ?: saved?.speed ?: 1f}×"
+        val playing = player?.playWhenReady == true && player.playbackState != Player.STATE_ENDED
+            && player.playbackState != Player.STATE_IDLE
+        val playAction = if (playing) "Pause" else "Play"
+        if (views.play.contentDescription != playAction) {
+            views.play.contentDescription = playAction
+            views.play.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        }
+        val speedText = "Speed · ${player?.playbackParameters?.speed ?: saved?.speed ?: 1f}×"
+        if (views.speed.text != speedText) views.speed.text = speedText
         val remaining = deadline - SystemClock.elapsedRealtime()
-        views.timer.text = if (remaining > 0) time(remaining) else "Sleep"
+        val timerText = if (remaining > 0) "Sleep · ${time(remaining)}" else "Sleep timer"
+        if (views.timer.text != timerText) views.timer.text = timerText
         views.previous.isEnabled = player?.hasPreviousMediaItem() == true
         views.next.isEnabled = player?.hasNextMediaItem() == true
+        views.rewind.isEnabled = duration > 0
+        views.forward.isEnabled = duration > 0
     }
 
     private fun toggle(book: Book) {
@@ -554,14 +658,19 @@ class MainActivity : Activity() {
         setPadding(dp(4), dp(4), dp(4), dp(4))
         setTextColor(ColorStateList(
             arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(0xFF83978F.toInt(), if (primary) this@MainActivity.background else white)
+            intArrayOf(muted, if (primary) Color.WHITE else this@MainActivity.foreground)
         ))
-        val fill = GradientDrawable().apply {
-            cornerRadius = dp(14).toFloat()
-            setColor(if (primary) mint else surface)
-        }
-        background = RippleDrawable(ColorStateList.valueOf(0x407D9D91), fill, null)
+        background = buttonBackground(primary)
         setOnClickListener { action() }
+    }
+
+    private fun buttonBackground(primary: Boolean): RippleDrawable {
+        val fill = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(if (primary) accent else surface)
+            if (!primary) setStroke(dp(1), border)
+        }
+        return RippleDrawable(ColorStateList.valueOf(0x40346BF1), fill, null)
     }
 
     private fun time(ms: Long): String {
