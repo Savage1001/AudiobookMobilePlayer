@@ -1,34 +1,50 @@
 # Local Chapter
 
-Local Chapter is a native Kotlin audiobook player for Android 8.0 and newer. It keeps the library and listening positions on the device and plays through Android's background media controls.
+Local Chapter is an offline audiobook player for Android 8.0 and later. It plays chapters from folders on your phone and remembers where you left off in each book.
 
-## Import a book
+## Install
 
-1. Keep each book's tracks together in a folder on your phone.
-2. Tap **Import folder** and select that folder. Local Chapter reads its top-level files through the Android folder picker.
-3. Tap **Play** to resume, or tap a track to start it from the beginning. Use **Rename** to change the folder-derived book title.
+1. Open the [latest GitHub release](https://github.com/Savage1001/AudiobookMobilePlayer/releases/latest).
+2. Under **Assets**, download the file ending in `.apk`.
+3. Open the downloaded file and follow Android’s installation prompts. If Android asks, allow installs from the app you used to open the file.
 
-Name tracks with at least two digits, a space, a hyphen, a space, and the title.
+Already using Local Chapter? Install the update over your existing copy to keep your library and saved positions.
 
-    00 - Prologue.mp3
-    01 - Chapter One.m4a
-    02 - A Change of Plans.mp4
-    03 - Epilogue.mp3
+## Add an audiobook
 
-Extensions are case-insensitive. MP4 files play their audio track. The starting number can be any number, including zero. The filename determines order and title, with filename sorting used to break numeric ties. The app reports gaps and duplicates and includes every matching file. Select the same folder again to refresh the track list.
+Put each book in its own folder. Name the MP3, M4A, or MP4 files with at least two digits, followed by a space, hyphen, space, and the chapter title.
 
-Playback includes 30-second skips, chapter navigation, speed, a sleep timer, and a saved track position for each book. On Galaxy devices, playback is available to One UI through the Android media session. Enable **Media player** under **Settings → Lock screen and AOD → Now bar** if available on your device.
+```text
+00 - Prologue.mp3
+01 - Chapter One.m4a
+02 - A Change of Plans.mp4
+03 - Epilogue.mp3
+```
 
-## Updates
+In Local Chapter, tap **Import folder**, select the book’s folder, and grant access. The folder name becomes the book title. Open the **⋯** menu on the player screen to rename it.
 
-Install [0.0.2 or newer](https://github.com/Savage1001/AudiobookMobilePlayer/releases/latest) to enable in-app updates. Local Chapter checks public GitHub releases when you open the library, at most once every six hours. Use **Check for updates** to check immediately. If a new release is available, tap **Download update** and confirm the installation in Android. Android may first ask you to allow Local Chapter to install updates.
+- Tracks play in numeric order, so `02` comes before `10`, and `100` comes after `99`. Numbering can start anywhere, including `00`.
+- The filenames determine the order and chapter titles. If two tracks have the same number, the app sorts them by filename and keeps both. It reports skipped or repeated numbers.
+- The app reads matching files directly inside the selected folder and plays the audio from MP4 files. Import the same folder again after adding or replacing tracks.
 
-The updater verifies the APK checksum, application ID, version, and signing certificate. Release checks send no audiobook or listening data. Import and playback work offline.
+## Listen
 
-## Build
+Tap a chapter in the list to start it, or tap **Play** to resume your saved position. Use the seek bar, previous and next chapter buttons, or 30-second skips to navigate. Playback speed and the sleep timer are below the controls.
 
-Use JDK 17 and Android SDK Platform 35. Set ANDROID_HOME to the SDK root and run:
+Playback continues in the background, with controls available through Android’s media notification. On supported Samsung Galaxy devices, turn on **Media player** under **Settings → Lock screen and AOD → Now bar** for lock-screen controls.
 
-    ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+## Get updates
 
-On Windows use gradlew.bat. The release task produces an unsigned APK. Sign it with a keystore stored outside the checkout. See [AGENTS.md](AGENTS.md) for repository privacy rules.
+From version `0.0.2` onward, the app checks GitHub for new releases when you open the library, at most once every six hours. Tap **Check for updates** in the library to check immediately. If an update is available, tap **Download update**, then confirm the installation in Android.
+
+Your books and listening progress stay on your device. Internet access is used only to check for and download app updates.
+
+## Build from source
+
+Requires JDK 17 and Android SDK Platform 35. Set `ANDROID_HOME` to your SDK directory.
+
+```sh
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+```
+
+On Windows, use `gradlew.bat`. The build produces an unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`. Keep signing keys outside the checkout. See [AGENTS.md](AGENTS.md) for the repository’s privacy and release rules.
