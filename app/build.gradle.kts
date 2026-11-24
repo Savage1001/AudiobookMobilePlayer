@@ -9,8 +9,8 @@ android {
         applicationId = "app.localchapter.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1"
+        versionCode = 2
+        versionName = "0.0.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,6 +19,7 @@ android {
 }
 kotlin { jvmToolchain(17) }
 dependencies {
+    implementation("androidx.core:core:1.13.1")
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-session:1.8.0")
     testImplementation("junit:junit:4.13.2")

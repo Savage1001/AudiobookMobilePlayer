@@ -9,11 +9,13 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -26,6 +28,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -34,6 +37,12 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.util.Locale
 
 class MainActivity : Activity() {
+    private companion object {
+        const val PICK_FOLDER = 10
+        const val INSTALL_PERMISSION = 11
+        const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    }
+
     private val background = Color.rgb(18, 26, 25)
     private val surface = Color.rgb(32, 50, 46)
     private val mint = Color.rgb(196, 243, 219)
@@ -41,7 +50,13 @@ class MainActivity : Activity() {
     private val white = Color.rgb(245, 251, 248)
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var library: Library
+    private lateinit var updates: GitHubUpdates
+    private val updatePreferences by lazy { getSharedPreferences("updates", MODE_PRIVATE) }
     private lateinit var root: LinearLayout
+    private var updateButton: Button? = null
+    private var updateInProgress = false
+    private var waitingForInstallPermission = false
+    private var inForeground = false
     private var connection: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var book: Book? = null
@@ -70,6 +85,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         library = Library(this)
+        updates = GitHubUpdates(applicationContext)
+        waitingForInstallPermission = savedInstanceState?.getBoolean("installPermission") ?: false
         val id = savedInstanceState?.getString("book") ?: playingBookFromIntent(intent)
         book = library.books().find { it.id == id }
         render()
@@ -87,7 +104,19 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("book", book?.id)
+        outState.putBoolean("installPermission", waitingForInstallPermission)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        inForeground = true
+        if (book == null && !waitingForInstallPermission) checkUpdates()
+    }
+
+    override fun onPause() {
+        inForeground = false
+        super.onPause()
     }
 
     override fun onStart() {
@@ -131,6 +160,7 @@ class MainActivity : Activity() {
     private fun render() {
         dragging = false
         controls = null
+        updateButton = null
         root = column().apply {
             setBackgroundColor(this@MainActivity.background)
             setOnApplyWindowInsetsListener { view, insets ->
@@ -149,6 +179,7 @@ class MainActivity : Activity() {
         val selected = book
         if (selected == null) renderLibrary() else renderBook(selected)
         updatePlayer()
+        if (inForeground && selected == null && !waitingForInstallPermission) checkUpdates()
     }
 
     private fun renderLibrary() {
@@ -158,6 +189,10 @@ class MainActivity : Activity() {
         page.addView(label("Your audiobook library", 16f, muted))
         page.addView(button(if (importing) "Scanning folder…" else "＋ Import folder", primary = true) { pickFolder() }
             .apply { isEnabled = !importing }, spaced(top = 22, bottom = 18))
+        updateButton = button("Check for updates") { checkUpdates(manual = true) }.also {
+            page.addView(it, spaced(bottom = 18))
+        }
+        updateButton?.isEnabled = !updateInProgress
         val books = library.books()
         if (books.isEmpty()) {
             page.addView(label("Choose a folder with numbered MP3, MP4, or M4A tracks.", 16f, muted))
@@ -361,19 +396,105 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    private fun checkUpdates(manual: Boolean = false, installAfterCheck: Boolean = false) {
+        if (updateInProgress) return
+        val now = System.currentTimeMillis()
+        val last = updatePreferences.getLong("lastCheck", 0L)
+        if (!manual && now - last in 0 until CHECK_INTERVAL_MS) return
+        updatePreferences.edit().putLong("lastCheck", now).apply()
+        setUpdateBusy(true)
+        Thread {
+            val result = runCatching { updates.latest() }
+            runOnUiThread {
+                setUpdateBusy(false)
+                if (!inForeground || isFinishing || (!manual && book != null)) return@runOnUiThread
+                result.onSuccess { release ->
+                    when {
+                        release == null -> if (manual) toast("Local Chapter is up to date")
+                        installAfterCheck -> downloadUpdate(release)
+                        else -> AlertDialog.Builder(this)
+                            .setTitle("Local Chapter ${release.tag} is available")
+                            .setMessage("Download the update from GitHub and confirm installation in Android.")
+                            .setPositiveButton("Download update") { _, _ -> downloadUpdate(release) }
+                            .setNegativeButton("Later", null).show()
+                    }
+                }.onFailure { if (manual) toast("Could not check GitHub for updates. Try again later.") }
+            }
+        }.start()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun downloadUpdate(release: UpdateRelease) {
+        if (updateInProgress) return
+        if (!packageManager.canRequestPackageInstalls()) {
+            AlertDialog.Builder(this).setTitle("Allow Local Chapter to install updates")
+                .setMessage("In Android settings, allow installs from this app. Android will still ask before installing.")
+                .setPositiveButton("Open settings") { _, _ ->
+                    runCatching {
+                        waitingForInstallPermission = true
+                        startActivityForResult(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:$packageName")), INSTALL_PERMISSION)
+                    }.onFailure {
+                        waitingForInstallPermission = false
+                        toast("Could not open Android's install settings")
+                    }
+                }.setNegativeButton("Cancel", null).show()
+            return
+        }
+        setUpdateBusy(true, downloading = true)
+        Thread {
+            val result = runCatching { updates.download(release) }
+            runOnUiThread {
+                setUpdateBusy(false)
+                if (!inForeground || isFinishing) {
+                    result.getOrNull()?.delete()
+                    return@runOnUiThread
+                }
+                result.onSuccess { file ->
+                    runCatching {
+                        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+                        startActivity(Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    }.onFailure {
+                        file.delete()
+                        toast("Could not open Android's package installer")
+                    }
+                }.onFailure { toast("Could not download or verify this update") }
+            }
+        }.start()
+    }
+
+    private fun setUpdateBusy(busy: Boolean, downloading: Boolean = false) {
+        updateInProgress = busy
+        updateButton?.isEnabled = !busy
+        updateButton?.text = when {
+            downloading -> "Downloading update…"
+            busy -> "Checking GitHub…"
+            else -> "Check for updates"
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun pickFolder() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             putExtra(Intent.EXTRA_LOCAL_ONLY, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        }, 10)
+        }, PICK_FOLDER)
     }
 
     @Deprecated("Uses the platform folder picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == INSTALL_PERMISSION) {
+            waitingForInstallPermission = false
+            if (packageManager.canRequestPackageInstalls()) {
+                handler.post { checkUpdates(manual = true, installAfterCheck = true) }
+            }
+            return
+        }
         val tree = data?.data ?: return
-        if (requestCode != 10 || resultCode != RESULT_OK || importing) return
+        if (requestCode != PICK_FOLDER || resultCode != RESULT_OK || importing) return
         importing = true
         render()
         Thread {

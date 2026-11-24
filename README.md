@@ -19,6 +19,12 @@ Extensions are case-insensitive. MP4 files play their audio track. The starting 
 
 Playback includes 30-second skips, chapter navigation, speed, a sleep timer, and a saved track position for each book. On Galaxy devices, playback is available to One UI through the Android media session. Enable **Media player** under **Settings → Lock screen and AOD → Now bar** if available on your device.
 
+## Updates
+
+Install [0.0.2 or newer](https://github.com/Savage1001/AudiobookMobilePlayer/releases/latest) to enable in-app updates. Local Chapter checks public GitHub releases when you open the library, at most once every six hours. Use **Check for updates** to check immediately. If a new release is available, tap **Download update** and confirm the installation in Android. Android may first ask you to allow Local Chapter to install updates.
+
+The updater verifies the APK checksum, application ID, version, and signing certificate. Release checks send no audiobook or listening data. Import and playback work offline.
+
 ## Build
 
 Use JDK 17 and Android SDK Platform 35. Set ANDROID_HOME to the SDK root and run:
