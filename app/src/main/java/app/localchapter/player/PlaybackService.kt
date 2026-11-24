@@ -2,6 +2,8 @@ package app.localchapter.player
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,9 +11,11 @@ import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.ContentDataSource
@@ -25,6 +29,7 @@ import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.Executors
 
 internal val openBookCommand = SessionCommand("app.localchapter.OPEN_BOOK", Bundle.EMPTY)
 internal val timerCommand = SessionCommand("app.localchapter.TIMER", Bundle.EMPTY)
@@ -35,6 +40,10 @@ class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var session: MediaSession
     private val handler = Handler(Looper.getMainLooper())
+    private val durationReader = Executors.newSingleThreadExecutor()
+    private val pendingSkips = ArrayDeque<Long>()
+    private var skipRequest = 0
+    private var resolvingSkip = false
     private var currentBook: Book? = null
     private var deadline = 0L
     private val checkpoint = object : Runnable {
@@ -64,6 +73,14 @@ class PlaybackService : MediaSessionService() {
                     .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int
+                    ) {
+                        if (resolvingSkip && reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                            cancelSkips()
+                        }
+                    }
+
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (events.containsAny(Player.EVENT_POSITION_DISCONTINUITY,
                                 Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED,
@@ -72,7 +89,11 @@ class PlaybackService : MediaSessionService() {
                 })
             }
         val launch = Intent(this, MainActivity::class.java).putExtra("showPlaying", true)
-        session = MediaSession.Builder(this, player)
+        val sessionPlayer = object : ForwardingPlayer(player) {
+            override fun seekBack() = skipBy(-seekBackIncrement)
+            override fun seekForward() = skipBy(seekForwardIncrement)
+        }
+        session = MediaSession.Builder(this, sessionPlayer)
             .setSessionActivity(PendingIntent.getActivity(this, 0, launch,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setCallback(PlaybackCallback()).build()
@@ -82,12 +103,70 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     override fun onDestroy() {
+        cancelSkips()
+        durationReader.shutdownNow()
         handler.removeCallbacksAndMessages(null)
         savePosition()
         session.release()
         player.release()
         super.onDestroy()
     }
+
+    private fun skipBy(offsetMs: Long) {
+        pendingSkips.addLast(offsetMs)
+        runNextSkip()
+    }
+
+    private fun cancelSkips() {
+        skipRequest++
+        resolvingSkip = false
+        pendingSkips.clear()
+    }
+
+    private fun runNextSkip() {
+        if (resolvingSkip) return
+        val offset = pendingSkips.removeFirstOrNull() ?: return
+        val tracks = currentBook?.tracks ?: return
+        val timeline = player.currentTimeline
+        val index = player.currentMediaItemIndex
+        if (index !in tracks.indices || timeline.windowCount != tracks.size) return
+        val start = ChapterPosition(index, player.currentPosition)
+        val window = Timeline.Window()
+        fun knownDuration(chapter: Int) = timeline.getWindow(chapter, window).durationMs.takeIf { it >= 0 }
+        val target = resolveChapterSkip(start, offset, tracks.size, ::knownDuration)
+        if (target != null) {
+            player.seekTo(target.index, target.positionMs)
+            if (pendingSkips.isNotEmpty()) handler.post(::runNextSkip)
+            return
+        }
+
+        val request = ++skipRequest
+        resolvingSkip = true
+        durationReader.execute {
+            val resolved = resolveChapterSkip(start, offset, tracks.size) { chapter ->
+                knownDuration(chapter) ?: readDuration(tracks[chapter].uri)
+            }
+            handler.post {
+                if (request != skipRequest) return@post
+                resolvingSkip = false
+                if (resolved != null) player.seekTo(resolved.index, resolved.positionMs)
+                else if (offset < 0) player.seekBack()
+                else player.seekForward()
+                runNextSkip()
+            }
+        }
+    }
+
+    private fun readDuration(uri: String): Long? = runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(this, Uri.parse(uri))
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.takeIf { it > 0 }
+        } finally {
+            retriever.release()
+        }
+    }.getOrNull()
 
     private fun savePosition() {
         val book = currentBook ?: return
@@ -149,6 +228,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun open(book: Book, requestedIndex: Int, play: Boolean) {
+        if (currentBook != book || requestedIndex >= 0) cancelSkips()
         val keepPlaying = currentBook?.id == book.id && player.playWhenReady
         if (currentBook != book || player.mediaItemCount == 0) {
             savePosition()

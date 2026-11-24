@@ -31,6 +31,8 @@ In Local Chapter, tap **Import folder**, select the book’s folder, and grant a
 
 Tap a chapter in the list to start it, or tap **Play** to resume your saved position. Use the seek bar, previous and next chapter buttons, or 30-second skips to navigate. Playback speed and the sleep timer are below the controls.
 
+The 30-second skips carry across chapter boundaries. If you skip back 30 seconds from 15 seconds into a chapter, playback moves to 15 seconds before the end of the previous chapter.
+
 Playback continues in the background, with controls available through Android’s media notification. On supported Samsung Galaxy devices, turn on **Media player** under **Settings → Lock screen and AOD → Now bar** for lock-screen controls.
 
 ## Get updates
