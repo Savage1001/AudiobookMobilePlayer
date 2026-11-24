@@ -33,6 +33,7 @@ import androidx.core.content.FileProvider
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import java.util.Locale
@@ -224,8 +225,34 @@ class MainActivity : Activity() {
             page.addView(button("${item.title}\n$details") { book = item; render() }.apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(17), dp(12), dp(17), dp(12))
+                setOnLongClickListener {
+                    confirmDelete(item)
+                    true
+                }
             }, spaced(bottom = 8))
         }
+    }
+
+    private fun confirmDelete(item: Book) {
+        AlertDialog.Builder(this).setTitle("Delete book?")
+            .setMessage("Remove “${item.title}” and its saved progress from your library? The audio files will stay on your device.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ -> delete(item) }
+            .show()
+    }
+
+    private fun delete(item: Book) {
+        val player = controller ?: return toast("Playback is connecting. Try again in a moment.")
+        val result = player.sendCustomCommand(deleteBookCommand, Bundle().apply { putString("id", item.id) })
+        result.addListener({
+            if (isDestroyed || isFinishing) return@addListener
+            if (runCatching { result.get().resultCode }.getOrNull() == SessionResult.RESULT_SUCCESS) {
+                timer(null)
+                if (book == null) render()
+            } else {
+                toast("Could not delete the book")
+            }
+        }, mainExecutorCompat())
     }
 
     private fun renderBook(book: Book) {

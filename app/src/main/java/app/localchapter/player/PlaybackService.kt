@@ -30,6 +30,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.Executors
 
 internal val openBookCommand = SessionCommand("app.localchapter.OPEN_BOOK", Bundle.EMPTY)
+internal val deleteBookCommand = SessionCommand("app.localchapter.DELETE_BOOK", Bundle.EMPTY)
 internal val timerCommand = SessionCommand("app.localchapter.TIMER", Bundle.EMPTY)
 
 @OptIn(UnstableApi::class)
@@ -176,7 +177,7 @@ class PlaybackService : MediaSessionService() {
             val ownApp = controller.uid == applicationInfo.uid
             if (!ownApp && !controller.isTrusted) return MediaSession.ConnectionResult.reject()
             val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-            if (ownApp) commands.add(openBookCommand).add(timerCommand)
+            if (ownApp) commands.add(openBookCommand).add(deleteBookCommand).add(timerCommand)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands.build())
                 .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -191,6 +192,22 @@ class PlaybackService : MediaSessionService() {
                 return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
             }
             val result = when (command.customAction) {
+                deleteBookCommand.customAction -> {
+                    val id = args.getString("id")
+                    if (id == null || !library.remove(id)) SessionResult(SessionError.ERROR_BAD_VALUE)
+                    else {
+                        if (currentBook?.id == id) {
+                            currentBook = null
+                            cancelSkips()
+                            handler.removeCallbacks(expire)
+                            deadline = 0L
+                            player.pause()
+                            player.stop()
+                            player.clearMediaItems()
+                        }
+                        SessionResult(SessionResult.RESULT_SUCCESS)
+                    }
+                }
                 openBookCommand.customAction -> {
                     val book = library.books().find { it.id == args.getString("id") }
                     if (book == null || book.tracks.isEmpty()) SessionResult(SessionError.ERROR_BAD_VALUE)

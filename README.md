@@ -23,6 +23,8 @@ Put each book in its own folder. Name the MP3, M4A, or MP4 files with at least t
 
 In Local Chapter, tap **Import folder**, select the book’s folder, and grant access. The folder name becomes the book title. Open the **⋯** menu on the player screen to rename it.
 
+To remove a book and its saved progress, press and hold its title in the library, then tap **Delete**. The audio files stay on your device.
+
 - Tracks play in numeric order, so `02` comes before `10`, and `100` comes after `99`. Numbering can start anywhere, including `00`.
 - The filenames determine the order and chapter titles. If two tracks have the same number, the app sorts them by filename and keeps both. It reports skipped or repeated numbers.
 - The app reads matching files directly inside the selected folder and plays the audio from MP4 files. Import the same folder again after adding or replacing tracks.

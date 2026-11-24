@@ -1,6 +1,7 @@
 package app.localchapter.player
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
@@ -31,6 +32,30 @@ internal class Library(private val context: Context) {
         val books = books().toMutableList()
         val index = books.indexOfFirst { it.id == book.id }
         if (index < 0) books.add(book) else books[index] = book
+        prefs.edit().putString("books", encodeBooks(books)).apply()
+    }
+
+    fun remove(id: String): Boolean {
+        val books = books()
+        val removed = books.find { it.id == id } ?: return false
+        val remaining = books.filterNot { it.id == id }
+        prefs.edit().putString("books", encodeBooks(remaining))
+            .remove("track:$id").remove("position:$id").remove("speed:$id").apply {
+                if (lastBook() == id) remove("lastBook")
+            }.apply()
+        if (remaining.none { it.folder == removed.folder }) {
+            try {
+                context.contentResolver.releasePersistableUriPermission(
+                    Uri.parse(removed.folder), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // The folder grant may already have been revoked.
+            }
+        }
+        return true
+    }
+
+    private fun encodeBooks(books: List<Book>): String {
         val result = JSONArray()
         books.forEach { item ->
             val files = JSONArray()
@@ -38,7 +63,7 @@ internal class Library(private val context: Context) {
             result.put(JSONObject().put("id", item.id).put("folder", item.folder)
                 .put("title", item.title).put("files", files))
         }
-        prefs.edit().putString("books", result.toString()).apply()
+        return result.toString()
     }
 
     fun scan(tree: Uri): Book {
