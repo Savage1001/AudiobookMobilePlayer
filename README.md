@@ -4,7 +4,7 @@ Local Chapter is an offline audiobook player for Android 8.0 and later. It plays
 
 ## Install
 
-1. Open the [latest GitHub release](https://github.com/Savage1001/AudiobookMobilePlayer/releases/latest).
+1. Open the [latest GitHub release](https://github.com/Savage1001/LocalChapter/releases/latest).
 2. Under **Assets**, download the file ending in `.apk`.
 3. Open the downloaded file and follow Android’s installation prompts. If Android asks, allow installs from the app you used to open the file.
 

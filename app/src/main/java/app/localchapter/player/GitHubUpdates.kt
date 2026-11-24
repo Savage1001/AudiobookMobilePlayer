@@ -19,7 +19,7 @@ class UpdateFileProvider : FileProvider()
 
 internal class GitHubUpdates(private val context: Context) {
     companion object {
-        private const val REPOSITORY = "Savage1001/AudiobookMobilePlayer"
+        private const val REPOSITORY = "Savage1001/LocalChapter"
         private const val MAX_APK_BYTES = 100L * 1024 * 1024
         private const val MAX_RELEASE_BYTES = 1024 * 1024
         private val stableTag = Regex("""(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})""")
