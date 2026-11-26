@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -38,30 +37,26 @@ class PlaybackService : MediaSessionService() {
     private lateinit var library: Library
     private lateinit var player: ExoPlayer
     private lateinit var session: MediaSession
+    private lateinit var settings: PlaybackPreferences
+    private lateinit var sleepTimer: SleepTimer
     private val handler = Handler(Looper.getMainLooper())
     private val durationReader = Executors.newSingleThreadExecutor()
     private val pendingSkips = ArrayDeque<Long>()
     private var skipRequest = 0
     private var resolvingSkip = false
     private var currentBook: Book? = null
-    private var deadline = 0L
     private val checkpoint = object : Runnable {
         override fun run() {
             if (player.isPlaying) savePosition()
             handler.postDelayed(this, 2_000)
         }
     }
-    private val expire = Runnable {
-        deadline = 0L
-        player.pause()
-    }
-
     override fun onCreate() {
         super.onCreate()
         library = Library(this)
+        settings = PlaybackPreferences(this)
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DataSource.Factory { ContentDataSource(this) }))
-            .setSeekBackIncrementMs(30_000).setSeekForwardIncrementMs(30_000)
             .setMaxSeekToPreviousPositionMs(Long.MAX_VALUE)
             .build().apply {
                 setAudioAttributes(AudioAttributes.Builder()
@@ -81,6 +76,9 @@ class PlaybackService : MediaSessionService() {
                     }
 
                     override fun onEvents(player: Player, events: Player.Events) {
+                        if (events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) && player.playWhenReady) {
+                            sleepTimer.clearExtension()
+                        }
                         if (events.containsAny(Player.EVENT_POSITION_DISCONTINUITY,
                                 Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED,
                                 Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)) savePosition()
@@ -89,6 +87,8 @@ class PlaybackService : MediaSessionService() {
             }
         val launch = Intent(this, MainActivity::class.java).putExtra("showPlaying", true)
         val sessionPlayer = object : ForwardingPlayer(player) {
+            override fun getSeekBackIncrement() = settings.rewindSeconds * 1000L
+            override fun getSeekForwardIncrement() = settings.forwardSeconds * 1000L
             override fun seekBack() = skipBy(-seekBackIncrement)
             override fun seekForward() = skipBy(seekForwardIncrement)
         }
@@ -96,6 +96,9 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(PendingIntent.getActivity(this, 0, launch,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setCallback(PlaybackCallback()).build()
+        sleepTimer = SleepTimer(this, handler, player, settings) {
+            session.setSessionExtras(timerState())
+        }
         handler.post(checkpoint)
     }
 
@@ -104,6 +107,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         cancelSkips()
         durationReader.shutdownNow()
+        sleepTimer.close()
         handler.removeCallbacksAndMessages(null)
         savePosition()
         session.release()
@@ -149,8 +153,11 @@ class PlaybackService : MediaSessionService() {
                 if (request != skipRequest) return@post
                 resolvingSkip = false
                 if (resolved != null) player.seekTo(resolved.index, resolved.positionMs)
-                else if (offset < 0) player.seekBack()
-                else player.seekForward()
+                else if (player.currentMediaItemIndex == start.index) {
+                    val duration = player.duration
+                    val targetMs = (start.positionMs + offset).coerceAtLeast(0L)
+                    player.seekTo(if (duration >= 0) targetMs.coerceAtMost(duration) else targetMs)
+                }
                 runNextSkip()
             }
         }
@@ -170,6 +177,11 @@ class PlaybackService : MediaSessionService() {
                 .setTitle(track.title).setArtist(book.title).setAlbumTitle(book.title)
                 .build())
             .build()
+    }
+
+    private fun timerState() = Bundle().apply {
+        putLong("deadline", sleepTimer.deadline)
+        putBoolean("canExtend", sleepTimer.canExtend)
     }
 
     private inner class PlaybackCallback : MediaSession.Callback {
@@ -199,8 +211,7 @@ class PlaybackService : MediaSessionService() {
                         if (currentBook?.id == id) {
                             currentBook = null
                             cancelSkips()
-                            handler.removeCallbacks(expire)
-                            deadline = 0L
+                            sleepTimer.set(0)
                             player.pause()
                             player.stop()
                             player.clearMediaItems()
@@ -217,13 +228,12 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
                 timerCommand.customAction -> {
-                    if (args.containsKey("minutes")) {
-                        val minutes = args.getInt("minutes").coerceIn(0, 120)
-                        handler.removeCallbacks(expire)
-                        deadline = if (minutes == 0) 0 else SystemClock.elapsedRealtime() + minutes * 60_000L
-                        if (deadline != 0L) handler.postDelayed(expire, minutes * 60_000L)
+                    when {
+                        args.containsKey("minutes") -> sleepTimer.set(args.getInt("minutes").coerceIn(0, 120))
+                        args.getBoolean("extend") -> sleepTimer.extend()
+                        else -> sleepTimer.refresh()
                     }
-                    SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putLong("deadline", deadline) })
+                    SessionResult(SessionResult.RESULT_SUCCESS, timerState())
                 }
                 else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
             }
@@ -232,6 +242,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun open(book: Book, requestedIndex: Int, play: Boolean) {
+        if (currentBook?.id != book.id) sleepTimer.clearExtension()
         if (currentBook != book || requestedIndex >= 0) cancelSkips()
         val keepPlaying = currentBook?.id == book.id && player.playWhenReady
         if (currentBook != book || player.mediaItemCount == 0) {

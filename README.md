@@ -33,7 +33,15 @@ To remove a book and its saved progress, press and hold its title in the library
 
 Each chapter’s length is shown on the right. Tap a chapter to start it, or tap **Play** to resume your saved position. Use the seek bar, previous and next chapter buttons, or 30-second skips to navigate. Playback speed and the sleep timer are below the controls.
 
-The 30-second skips carry across chapter boundaries. If you skip back 30 seconds from 15 seconds into a chapter, playback moves to 15 seconds before the end of the previous chapter.
+Skip buttons carry across chapter boundaries. Open **Settings** in the library to set rewind and forward lengths independently. Both default to 30 seconds.
+
+### Sleep timer
+
+Pick a duration from 1 to 120 minutes and tap **Start timer**. In library **Settings**, you can save a custom preset, turn the 30-second audio fade on or off, and enable **Shake to extend**. When enabled, shake near the end of the timer to restart it for the same duration. You can also tap **Extend** in the timer panel for up to 30 seconds after it ends.
+
+### Car Mode
+
+Open **⋯ → Car Mode** on the player, or choose **Car Mode** from library **Settings**. The phone screen stays awake and shows large play, pause, rewind, and forward controls.
 
 Playback continues in the background, with controls available through Android’s media notification. On supported Samsung Galaxy devices, turn on **Media player** under **Settings → Lock screen and AOD → Now bar** for lock-screen controls.
 

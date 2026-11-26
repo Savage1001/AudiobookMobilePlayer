@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private val chapterDurationReader = Executors.newSingleThreadExecutor()
     private var chapterDurationTask: Future<*>? = null
     private lateinit var library: Library
+    private lateinit var playbackSettings: PlaybackPreferences
     private lateinit var updates: GitHubUpdates
     private val updatePreferences by lazy { getSharedPreferences("updates", MODE_PRIVATE) }
     private lateinit var root: LinearLayout
@@ -73,6 +74,9 @@ class MainActivity : Activity() {
     private var controls: Controls? = null
     private var dragging = false
     private var deadline = 0L
+    private var timerCanExtend = false
+    private var carMode = false
+    private var carControls: CarControls? = null
     private var importing = false
     private val tick = object : Runnable {
         override fun run() {
@@ -93,13 +97,17 @@ class MainActivity : Activity() {
         val previous: View, val next: View, val rewind: View, val forward: View, val chapters: ListView
     )
 
+    private data class CarControls(val chapter: TextView, val play: Button, val rewind: Button, val forward: Button)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         library = Library(this)
+        playbackSettings = PlaybackPreferences(this)
         updates = GitHubUpdates(applicationContext)
         waitingForInstallPermission = savedInstanceState?.getBoolean("installPermission") ?: false
         val id = savedInstanceState?.getString("book") ?: playingBookFromIntent(intent)
         book = library.books().find { it.id == id }
+        carMode = book != null && savedInstanceState?.getBoolean("carMode") == true
         render()
     }
 
@@ -115,6 +123,7 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("book", book?.id)
+        outState.putBoolean("carMode", carMode)
         outState.putBoolean("installPermission", waitingForInstallPermission)
         super.onSaveInstanceState(outState)
     }
@@ -133,7 +142,11 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
-        val future = MediaController.Builder(this, token).buildAsync()
+        val future = MediaController.Builder(this, token).setListener(object : MediaController.Listener {
+            override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+                if (this@MainActivity.controller === controller) updateTimerState(extras)
+            }
+        }).buildAsync()
         connection = future
         future.addListener({
             if (connection === future) {
@@ -164,7 +177,8 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (book == null) super.onBackPressed()
+        if (carMode) exitCarMode()
+        else if (book == null) super.onBackPressed()
         else {
             book = null
             render()
@@ -177,6 +191,7 @@ class MainActivity : Activity() {
         chapterDurationTask?.cancel(true)
         dragging = false
         controls = null
+        carControls = null
         updateButton = null
         root = column().apply {
             setBackgroundColor(this@MainActivity.background)
@@ -198,7 +213,13 @@ class MainActivity : Activity() {
         setContentView(root)
         root.requestApplyInsets()
         val selected = book
-        if (selected == null) renderLibrary() else renderBook(selected)
+        if (selected != null && carMode) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            renderCarMode(selected)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (selected == null) renderLibrary() else renderBook(selected)
+        }
         updatePlayer()
         if (inForeground && selected == null && !waitingForInstallPermission) checkUpdates()
     }
@@ -208,6 +229,7 @@ class MainActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
         page.addView(label("Local Chapter", 35f, foreground, bold = true))
         page.addView(label("Your audiobook library", 16f, muted))
+        page.addView(button("Settings") { showPlaybackSettings() }, spaced(top = 12))
         page.addView(button(if (importing) "Scanning folder…" else "＋ Import folder", primary = true) { pickFolder() }
             .apply { isEnabled = !importing }, spaced(top = 22, bottom = 18))
         updateButton = button("Check for updates") { checkUpdates(manual = true) }.also {
@@ -241,6 +263,95 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ -> delete(item) }
             .show()
+    }
+
+    private fun showPlaybackSettings() {
+        val form = column().apply { setPadding(dp(20), dp(8), dp(20), dp(8)) }
+        fun numberField(title: String, value: Int, hint: String): EditText {
+            form.addView(label(title, 14f, foreground, bold = true), spaced(top = 8))
+            return EditText(this).apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                contentDescription = title
+                this.hint = hint
+                if (value > 0) setText(value.toString())
+                form.addView(this)
+            }
+        }
+        val rewind = numberField("Rewind seconds", playbackSettings.rewindSeconds, "1–120 seconds")
+        val forward = numberField("Forward seconds", playbackSettings.forwardSeconds, "1–120 seconds")
+        val custom = numberField("Custom sleep preset (minutes)", playbackSettings.customTimerMinutes, "1–120 minutes, or blank")
+        val fade = android.widget.CheckBox(this).apply {
+            text = "Fade audio in the final 30 seconds"
+            isChecked = playbackSettings.fadeTimer
+        }
+        val shake = android.widget.CheckBox(this).apply {
+            text = "Shake to extend at the end of the timer"
+            isChecked = playbackSettings.shakeTimer
+        }
+        form.addView(fade, spaced(top = 8))
+        form.addView(shake)
+        val dialog = AlertDialog.Builder(this).setTitle("Playback settings")
+            .setView(ScrollView(this).apply { addView(form) })
+            .setNegativeButton("Cancel", null).setPositiveButton("Save", null)
+            .setNeutralButton("Car Mode") { _, _ ->
+                val books = library.books()
+                val last = library.lastBook()
+                val selected = books.find { it.id == last } ?: books.firstOrNull()
+                if (selected != null) enterCarMode(selected) else toast("Import a book to use Car Mode")
+            }.create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                fun checked(field: EditText, optional: Boolean = false): Int? {
+                    val input = field.text.toString().trim()
+                    if (optional && input.isEmpty()) return 0
+                    return input.toIntOrNull()?.takeIf { it in 1..120 } ?: run {
+                        field.error = "Enter a number from 1 to 120"
+                        null
+                    }
+                }
+                val back = checked(rewind) ?: return@setOnClickListener
+                val ahead = checked(forward) ?: return@setOnClickListener
+                val preset = checked(custom, optional = true) ?: return@setOnClickListener
+                playbackSettings.rewindSeconds = back
+                playbackSettings.forwardSeconds = ahead
+                playbackSettings.customTimerMinutes = preset
+                playbackSettings.fadeTimer = fade.isChecked
+                playbackSettings.shakeTimer = shake.isChecked
+                timer(null)
+                dialog.dismiss()
+            }
+        }
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+        dialog.show()
+    }
+
+    private fun enterCarMode(selected: Book) {
+        book = selected
+        carMode = true
+        render()
+    }
+
+    private fun exitCarMode() {
+        carMode = false
+        render()
+    }
+
+    private fun renderCarMode(selected: Book) {
+        val page = column().apply { setPadding(dp(20), dp(12), dp(20), dp(20)) }
+        root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        page.addView(button("Exit Car Mode") { exitCarMode() })
+        page.addView(label(selected.title, 21f, muted, bold = true), spaced(top = 20))
+        val chapter = label("", 28f, foreground, bold = true).apply { maxLines = 2 }
+        page.addView(chapter, spaced(top = 4, bottom = 16))
+        val play = button("Play", primary = true) { toggle(selected) }.apply { textSize = 26f }
+        page.addView(play, LinearLayout.LayoutParams(-1, dp(92)))
+        val rewind = button("Back ${playbackSettings.rewindSeconds}s") { active()?.seekBack() }.apply { textSize = 20f }
+        val forward = button("Forward ${playbackSettings.forwardSeconds}s") { active()?.seekForward() }.apply { textSize = 20f }
+        page.addView(row().apply {
+            addView(rewind, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(6) })
+            addView(forward, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(6) })
+        }, spaced(top = 12))
+        carControls = CarControls(chapter, play, rewind, forward)
     }
 
     private fun delete(item: Book) {
@@ -312,8 +423,10 @@ class MainActivity : Activity() {
         val previous = transportIcon(R.drawable.ic_previous, "Previous chapter") { active()?.seekToPreviousMediaItem() }
         val next = transportIcon(R.drawable.ic_next, "Next chapter") { active()?.seekToNextMediaItem() }
         val play = transportIcon(R.drawable.ic_play, "Play", primary = true) { toggle(book) }
-        val rewind = button("−30") { active()?.seekBack() }.apply { contentDescription = "Back 30 seconds" }
-        val forward = button("+30") { active()?.seekForward() }.apply { contentDescription = "Forward 30 seconds" }
+        val rewind = button("−${playbackSettings.rewindSeconds}") { active()?.seekBack() }
+            .apply { contentDescription = "Back ${playbackSettings.rewindSeconds} seconds" }
+        val forward = button("+${playbackSettings.forwardSeconds}") { active()?.seekForward() }
+            .apply { contentDescription = "Forward ${playbackSettings.forwardSeconds} seconds" }
         page.addView(row().apply {
             gravity = Gravity.CENTER
             addView(previous, transportSlot())
@@ -352,9 +465,14 @@ class MainActivity : Activity() {
 
     private fun showBookOptions(book: Book) {
         val warnings = TrackOrder.warnings(book.tracks)
-        val choices = if (warnings.isEmpty()) arrayOf("Rename book") else arrayOf("Rename book", "Numbering details")
+        val choices = if (warnings.isEmpty()) arrayOf("Rename book", "Car Mode")
+            else arrayOf("Rename book", "Car Mode", "Numbering details")
         AlertDialog.Builder(this).setTitle(book.title).setItems(choices) { _, index ->
-            if (index == 0) rename(book) else showWarnings(warnings)
+            when (index) {
+                0 -> rename(book)
+                1 -> enterCarMode(book)
+                else -> showWarnings(warnings)
+            }
         }.show()
     }
 
@@ -465,7 +583,6 @@ class MainActivity : Activity() {
 
     private fun updatePlayer() {
         val selected = book ?: return
-        val views = controls ?: return
         val player = active()
         val saved = if (player == null) library.bookmark(selected.id) else null
         val index = player?.currentMediaItemIndex
@@ -473,6 +590,17 @@ class MainActivity : Activity() {
         val title = selected.tracks.getOrNull(index)?.title.orEmpty()
         val position = player?.currentPosition ?: saved?.position ?: 0
         val duration = player?.duration ?: 0
+        val playing = player?.playWhenReady == true && player.playbackState != Player.STATE_ENDED
+            && player.playbackState != Player.STATE_IDLE
+        val playAction = if (playing) "Pause" else "Play"
+        carControls?.let {
+            if (it.chapter.text != title) it.chapter.text = title
+            if (it.play.text != playAction) it.play.text = playAction
+            it.play.isEnabled = controller != null
+            it.rewind.isEnabled = duration > 0
+            it.forward.isEnabled = duration > 0
+        }
+        val views = controls ?: return
         if (views.chapter.text != title) views.chapter.text = title
         if (views.chapters.checkedItemPosition != index) {
             views.chapters.setItemChecked(index, true)
@@ -486,9 +614,6 @@ class MainActivity : Activity() {
         }
         views.seek.isEnabled = duration > 0
         views.play.isEnabled = controller != null
-        val playing = player?.playWhenReady == true && player.playbackState != Player.STATE_ENDED
-            && player.playbackState != Player.STATE_IDLE
-        val playAction = if (playing) "Pause" else "Play"
         if (views.play.contentDescription != playAction) {
             views.play.contentDescription = playAction
             views.play.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
@@ -496,7 +621,11 @@ class MainActivity : Activity() {
         val speedText = "Speed · ${player?.playbackParameters?.speed ?: saved?.speed ?: 1f}×"
         if (views.speed.text != speedText) views.speed.text = speedText
         val remaining = deadline - SystemClock.elapsedRealtime()
-        val timerText = if (remaining > 0) "Sleep · ${time(remaining)}" else "Sleep timer"
+        val timerText = when {
+            remaining > 0 -> "Sleep · ${time(remaining)}"
+            timerCanExtend -> "Sleep timer ended"
+            else -> "Sleep timer"
+        }
         if (views.timer.text != timerText) views.timer.text = timerText
         views.previous.isEnabled = player?.hasPreviousMediaItem() == true
         views.next.isEnabled = player?.hasNextMediaItem() == true
@@ -651,26 +780,33 @@ class MainActivity : Activity() {
         panel.addView(label("Pause playback in", 14f, 0xFFBBBBBB.toInt()).apply { gravity = Gravity.CENTER })
         val readout = panelReadout()
         panel.addView(readout, spaced(bottom = 16))
-        val slider = panelSlider("Timer duration", 120 / step - 1)
+        val slider = panelSlider("Timer duration", 119)
         val shorter = panelButton("−", "Decrease timer by five minutes")
         val longer = panelButton("+", "Increase timer by five minutes")
         panel.addView(sliderRow(shorter, slider, longer))
         val presets = listOf(5, 15, 30, 60, 120)
         val buttons = presets.map { panelButton("${it}m", "$it minutes") }
         panel.addView(panelButtonRow(buttons), spaced(top = 16))
+        val custom = playbackSettings.customTimerMinutes
+        val customButton = if (custom > 0 && custom !in presets) {
+            panelButton("Custom · $custom min", "Saved custom timer of $custom minutes").also {
+                panel.addView(panelButtonRow(listOf(it)), spaced(top = 8))
+            }
+        } else null
 
         fun showDuration(progress: Int) {
             slider.progress = progress.coerceIn(0, slider.max)
-            val minutes = (slider.progress + 1) * step
+            val minutes = slider.progress + 1
             readout.text = "$minutes min"
             shorter.isEnabled = slider.progress > 0
             longer.isEnabled = slider.progress < slider.max
             presets.zip(buttons).forEach { (preset, button) -> button.isSelected = preset == minutes }
+            customButton?.isSelected = custom == minutes
         }
 
         val remaining = deadline - SystemClock.elapsedRealtime()
-        val selectedMinutes = if (remaining > 0) ((remaining + 299_999L) / 300_000L).toInt() * step else 30
-        showDuration(selectedMinutes / step - 1)
+        val selectedMinutes = if (remaining > 0) ((remaining + 59_999L) / 60_000L).toInt() else 30
+        showDuration(selectedMinutes - 1)
         slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) showDuration(progress)
@@ -678,31 +814,40 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(bar: SeekBar) = Unit
             override fun onStopTrackingTouch(bar: SeekBar) = Unit
         })
-        shorter.setOnClickListener { showDuration(slider.progress - 1) }
-        longer.setOnClickListener { showDuration(slider.progress + 1) }
+        shorter.setOnClickListener { showDuration(slider.progress - step) }
+        longer.setOnClickListener { showDuration(slider.progress + step) }
         presets.zip(buttons).forEach { (preset, button) ->
-            button.setOnClickListener { showDuration(preset / step - 1) }
+            button.setOnClickListener { showDuration(preset - 1) }
         }
-        val off = panelButton("Turn off", "Turn timer off").apply { isEnabled = remaining > 0 }
+        customButton?.setOnClickListener { showDuration(custom - 1) }
+        val canExtend = timerCanExtend
+        val off = if (canExtend) panelButton("Extend", "Extend last timer")
+            else panelButton("Turn off", "Turn timer off").apply { isEnabled = remaining > 0 }
         val start = panelButton(if (remaining > 0) "Reset timer" else "Start timer",
             if (remaining > 0) "Reset timer" else "Start timer").apply { isSelected = true }
         panel.addView(panelButtonRow(listOf(off, start)), spaced(top = 12))
         val dialog = showControlPanel(panel)
-        off.setOnClickListener { timer(0); dialog.dismiss() }
-        start.setOnClickListener { timer((slider.progress + 1) * step); dialog.dismiss() }
+        off.setOnClickListener { if (canExtend) timer(null, extend = true) else timer(0); dialog.dismiss() }
+        start.setOnClickListener { timer(slider.progress + 1); dialog.dismiss() }
     }
 
-    private fun timer(minutes: Int?) {
+    private fun timer(minutes: Int?, extend: Boolean = false) {
         val player = controller ?: return
         val result = player.sendCustomCommand(timerCommand, Bundle().apply {
             if (minutes != null) putInt("minutes", minutes)
+            if (extend) putBoolean("extend", true)
         })
         result.addListener({
             if (controller === player) runCatching { result.get() }.onSuccess {
-                deadline = it.extras.getLong("deadline")
-                updatePlayer()
+                if (it.resultCode == SessionResult.RESULT_SUCCESS) updateTimerState(it.extras)
             }
         }, mainExecutorCompat())
+    }
+
+    private fun updateTimerState(extras: Bundle) {
+        deadline = extras.getLong("deadline")
+        timerCanExtend = extras.getBoolean("canExtend")
+        updatePlayer()
     }
 
     private fun rename(book: Book) {
