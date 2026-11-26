@@ -31,6 +31,8 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -426,15 +428,25 @@ class MainActivity : Activity() {
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(8), 0, dp(8), 0)
+                minHeight = dp(48)
+                setOnLongClickListener {
+                    rename(book)
+                    true
+                }
+                ViewCompat.replaceAccessibilityAction(
+                    this, AccessibilityActionCompat.ACTION_LONG_CLICK, "Rename book"
+                ) { view, _ -> view.performLongClick() }
             }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(button("⋯") { showBookOptions(book) }.apply {
-                contentDescription = "Book options"
-                textSize = 20f
-            },
+            addView(transportIcon(R.drawable.ic_car, "Car Mode") { enterCarMode(book) },
                 LinearLayout.LayoutParams(dp(48), dp(48)))
         })
 
-        page.addView(label("Chapters · ${book.tracks.size}", 14f, muted, bold = true), spaced(top = 12, bottom = 6))
+        val warnings = TrackOrder.warnings(book.tracks)
+        page.addView(row().apply {
+            addView(label("Chapters · ${book.tracks.size}", 14f, muted, bold = true), weighted())
+            if (warnings.isNotEmpty()) addView(button("Numbering details") { showWarnings(warnings) }
+                .apply { setPadding(dp(10), 0, dp(10), 0) })
+        }, spaced(top = 12, bottom = 6))
         val chapters = chapterList(book)
         page.addView(chapters, if (compact) LinearLayout.LayoutParams(-1, dp(190))
             else LinearLayout.LayoutParams(-1, 0, 1f))
@@ -534,19 +546,6 @@ class MainActivity : Activity() {
         })
     }
 
-
-    private fun showBookOptions(book: Book) {
-        val warnings = TrackOrder.warnings(book.tracks)
-        val choices = if (warnings.isEmpty()) arrayOf("Rename book", "Car Mode")
-            else arrayOf("Rename book", "Car Mode", "Numbering details")
-        AlertDialog.Builder(this).setTitle(book.title).setItems(choices) { _, index ->
-            when (index) {
-                0 -> rename(book)
-                1 -> enterCarMode(book)
-                else -> showWarnings(warnings)
-            }
-        }.show()
-    }
 
     private fun chapterList(book: Book): ListView {
         val durations = arrayOfNulls<String>(book.tracks.size)

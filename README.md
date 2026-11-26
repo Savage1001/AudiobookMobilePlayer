@@ -21,7 +21,7 @@ Put each book in its own folder. Name the MP3, M4A, or MP4 files with at least t
 03 - Epilogue.mp3
 ```
 
-In Local Chapter, tap **Import folder**, select the book’s folder, and grant access. The folder name becomes the book title. Open the **⋯** menu on the player screen to rename it.
+In Local Chapter, tap **Import folder**, select the book’s folder, and grant access. The folder name becomes the book title. Press and hold the title at the top of the player to rename it.
 
 To remove a book and its saved progress, press and hold its title in the library, then tap **Delete**. The audio files stay on your device.
 
@@ -43,7 +43,7 @@ Pick a duration from 1 to 120 minutes and tap **Start timer**. In library **Sett
 
 ### Car Mode
 
-Open **⋯ → Car Mode** on the player. The phone screen stays awake and shows large play, pause, rewind, and forward controls, plus a read-only chapter progress bar with elapsed and remaining time.
+Tap the car icon at the top right of the player. The phone screen stays awake and shows large play, pause, rewind, and forward controls, plus a read-only chapter progress bar with elapsed and remaining time.
 
 Playback continues in the background, with controls available through Android’s media notification. On supported Samsung Galaxy devices, turn on **Media player** under **Settings → Lock screen and AOD → Now bar** for lock-screen controls.
 
