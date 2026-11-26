@@ -72,6 +72,7 @@ class MainActivity : Activity() {
     private val updatePreferences by lazy { getSharedPreferences("updates", MODE_PRIVATE) }
     private lateinit var root: LinearLayout
     private var updateButton: Button? = null
+    private var updateButtonText = "Check for updates"
     private var updateInProgress = false
     private var waitingForInstallPermission = false
     private var inForeground = false
@@ -244,15 +245,14 @@ class MainActivity : Activity() {
     private fun renderLibrary() {
         val page = paddedColumn(SCREEN_INSET)
         root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        page.addView(label("Local Chapter", 35f, foreground, bold = true))
+        page.addView(row().apply {
+            addView(label("Local Chapter", 35f, this@MainActivity.foreground, bold = true), weighted())
+            addView(transportIcon(R.drawable.ic_settings, "Settings") { showPlaybackSettings() },
+                LinearLayout.LayoutParams(dp(48), dp(48)))
+        })
         page.addView(label("Your audiobook library", 16f, muted))
-        page.addView(button("Settings") { showPlaybackSettings() }, spaced(top = SECTION_GAP))
         page.addView(button(if (importing) "Scanning folder…" else "＋ Import folder", primary = true) { pickFolder() }
-            .apply { isEnabled = !importing }, spaced(top = GAP))
-        updateButton = button("Check for updates") { checkUpdates(manual = true) }.also {
-            page.addView(it, spaced(top = GAP, bottom = SECTION_GAP))
-        }
-        updateButton?.isEnabled = !updateInProgress
+            .apply { isEnabled = !importing }, spaced(top = SECTION_GAP, bottom = SECTION_GAP))
         val books = library.books()
         if (books.isEmpty()) {
             page.addView(label("Choose a folder with numbered MP3, MP4, or M4A tracks.", 16f, muted))
@@ -317,9 +317,17 @@ class MainActivity : Activity() {
         val shake = settingsSwitch("Shake to extend at the end of the timer", playbackSettings.shakeTimer)
         form.addView(fade, spaced(top = SECTION_GAP))
         form.addView(shake, spaced(top = GAP))
-        val dialog = AlertDialog.Builder(this).setTitle("Playback settings")
+        val checkButton = button(updateButtonText) { checkUpdates(manual = true) }.apply {
+            isEnabled = !updateInProgress
+        }
+        updateButton = checkButton
+        form.addView(checkButton, spaced(top = SECTION_GAP))
+        val dialog = AlertDialog.Builder(this).setTitle("Settings")
             .setView(ScrollView(this).apply { addView(form) })
             .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnDismissListener {
+            if (updateButton === checkButton) updateButton = null
+        }
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val seconds = presets.getOrNull(interval.selectedItemPosition)
@@ -1076,11 +1084,12 @@ class MainActivity : Activity() {
     private fun setUpdateBusy(busy: Boolean, downloading: Boolean = false) {
         updateInProgress = busy
         updateButton?.isEnabled = !busy
-        updateButton?.text = when {
+        updateButtonText = when {
             downloading -> "Downloading update…"
             busy -> "Checking GitHub…"
             else -> "Check for updates"
         }
+        updateButton?.text = updateButtonText
     }
 
     @Suppress("DEPRECATION")

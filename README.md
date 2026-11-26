@@ -49,7 +49,7 @@ Playback continues in the background, with controls available through Android’
 
 ## Get updates
 
-From version `0.0.2` onward, the app checks GitHub for new releases when you open the library, at most once every six hours. Tap **Check for updates** in the library to check immediately. If an update is available, tap **Download update**, then confirm the installation in Android.
+The app checks GitHub for new releases when you open the library, at most once every six hours. To check immediately, open the **Settings** gear in the library and tap **Check for updates**. If an update is available, tap **Download update**, then confirm the installation in Android.
 
 Your books and listening progress stay on your device. Internet access is used only to check for and download app updates.
 
