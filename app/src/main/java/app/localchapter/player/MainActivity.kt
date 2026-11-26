@@ -421,8 +421,11 @@ class MainActivity : Activity() {
         else root.addView(page, LinearLayout.LayoutParams(-1, 0, 1f))
 
         page.addView(row().apply {
-            addView(button("‹ Library") { this@MainActivity.book = null; render() }
-                .apply { setPadding(dp(12), 0, dp(12), 0) })
+            val actionSize = dp(48)
+            addView(transportIcon(R.drawable.ic_back, "Back to library") {
+                this@MainActivity.book = null
+                render()
+            }, LinearLayout.LayoutParams(actionSize, actionSize))
             addView(label(book.title, 16f, this@MainActivity.foreground, bold = true).apply {
                 gravity = Gravity.CENTER
                 maxLines = 2
@@ -438,7 +441,7 @@ class MainActivity : Activity() {
                 ) { view, _ -> view.performLongClick() }
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(transportIcon(R.drawable.ic_car, "Car Mode") { enterCarMode(book) },
-                LinearLayout.LayoutParams(dp(48), dp(48)))
+                LinearLayout.LayoutParams(actionSize, actionSize))
         })
 
         val warnings = TrackOrder.warnings(book.tracks)
