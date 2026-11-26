@@ -531,43 +531,16 @@ class MainActivity : Activity() {
         val minimum = 50
         val maximum = 300
         val step = 5
-        val panel = column().apply {
-            setPadding(dp(14), dp(18), dp(14), dp(14))
-            background = GradientDrawable().apply {
-                setColor(Color.BLACK)
-                cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), 0xFF3A3A3A.toInt())
-            }
-            if (Build.VERSION.SDK_INT >= 28) accessibilityPaneTitle = "Playback speed"
-        }
-        val readout = label("", 30f, Color.WHITE, bold = true).apply {
-            gravity = Gravity.CENTER
-            fontFeatureSettings = "tnum"
-        }
+        val panel = controlPanel("Playback speed")
+        val readout = panelReadout()
         panel.addView(readout, spaced(bottom = 16))
-        val slider = SeekBar(this).apply {
-            max = (maximum - minimum) / step
-            contentDescription = "Playback speed"
-            progressTintList = ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = ColorStateList.valueOf(0xFF777777.toInt())
-            thumbTintList = ColorStateList.valueOf(Color.WHITE)
-        }
-        val slower = speedControl("−", "Decrease speed")
-        val faster = speedControl("+", "Increase speed")
-        panel.addView(row().apply {
-            addView(slower, LinearLayout.LayoutParams(dp(48), dp(48)))
-            addView(slider, LinearLayout.LayoutParams(0, dp(48), 1f))
-            addView(faster, LinearLayout.LayoutParams(dp(48), dp(48)))
-        })
+        val slider = panelSlider("Playback speed", (maximum - minimum) / step)
+        val slower = panelButton("−", "Decrease speed")
+        val faster = panelButton("+", "Increase speed")
+        panel.addView(sliderRow(slower, slider, faster))
         val presets = listOf(100 to "1.0", 125 to "1.25", 150 to "1.5", 200 to "2.0", 300 to "3.0")
-        val buttons = presets.map { (_, title) -> speedControl(title, "$title times speed") }
-        panel.addView(row().apply {
-            buttons.forEachIndexed { index, button ->
-                addView(button, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-                    if (index > 0) marginStart = dp(6)
-                })
-            }
-        }, spaced(top = 16))
+        val buttons = presets.map { (_, title) -> panelButton(title, "$title times speed") }
+        panel.addView(panelButtonRow(buttons), spaced(top = 16))
 
         fun showSpeed(progress: Int, apply: Boolean) {
             val percent = minimum + progress.coerceIn(0, slider.max) * step
@@ -596,6 +569,47 @@ class MainActivity : Activity() {
             button.setOnClickListener { showSpeed((preset.first - minimum) / step, apply = true) }
         }
 
+        showControlPanel(panel)
+    }
+
+    private fun controlPanel(title: String) = column().apply {
+        setPadding(dp(14), dp(18), dp(14), dp(14))
+        background = GradientDrawable().apply {
+            setColor(Color.BLACK)
+            cornerRadius = dp(20).toFloat()
+            setStroke(dp(1), 0xFF3A3A3A.toInt())
+        }
+        if (Build.VERSION.SDK_INT >= 28) accessibilityPaneTitle = title
+    }
+
+    private fun panelReadout() = label("", 30f, Color.WHITE, bold = true).apply {
+        gravity = Gravity.CENTER
+        fontFeatureSettings = "tnum"
+    }
+
+    private fun panelSlider(description: String, steps: Int) = SeekBar(this).apply {
+        max = steps
+        contentDescription = description
+        progressTintList = ColorStateList.valueOf(Color.WHITE)
+        progressBackgroundTintList = ColorStateList.valueOf(0xFF777777.toInt())
+        thumbTintList = ColorStateList.valueOf(Color.WHITE)
+    }
+
+    private fun sliderRow(decrease: Button, slider: SeekBar, increase: Button) = row().apply {
+        addView(decrease, LinearLayout.LayoutParams(dp(48), dp(48)))
+        addView(slider, LinearLayout.LayoutParams(0, dp(48), 1f))
+        addView(increase, LinearLayout.LayoutParams(dp(48), dp(48)))
+    }
+
+    private fun panelButtonRow(buttons: List<Button>) = row().apply {
+        buttons.forEachIndexed { index, button ->
+            addView(button, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                if (index > 0) marginStart = dp(6)
+            })
+        }
+    }
+
+    private fun showControlPanel(panel: View): Dialog {
         val dialog = Dialog(this).apply {
             requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
             setContentView(panel)
@@ -607,9 +621,10 @@ class MainActivity : Activity() {
             val width = minOf(resources.displayMetrics.widthPixels - dp(24), dp(440))
             setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
         }
+        return dialog
     }
 
-    private fun speedControl(text: String, description: String) = Button(this).apply {
+    private fun panelButton(text: String, description: String) = Button(this).apply {
         this.text = text
         contentDescription = description
         textSize = if (text.length == 1) 23f else 14f
@@ -631,11 +646,50 @@ class MainActivity : Activity() {
 
     private fun chooseTimer() {
         if (active() == null) return toast("Start the book to set a sleep timer")
-        val choices = listOf(0, 5, 10, 15, 30, 45, 60, 90, 120)
-        AlertDialog.Builder(this).setTitle("Pause playback in")
-            .setItems(choices.map { if (it == 0) "Turn timer off" else "$it minutes" }.toTypedArray()) { _, index ->
-                timer(choices[index])
-            }.setNegativeButton("Cancel", null).show()
+        val step = 5
+        val panel = controlPanel("Sleep timer")
+        panel.addView(label("Pause playback in", 14f, 0xFFBBBBBB.toInt()).apply { gravity = Gravity.CENTER })
+        val readout = panelReadout()
+        panel.addView(readout, spaced(bottom = 16))
+        val slider = panelSlider("Timer duration", 120 / step - 1)
+        val shorter = panelButton("−", "Decrease timer by five minutes")
+        val longer = panelButton("+", "Increase timer by five minutes")
+        panel.addView(sliderRow(shorter, slider, longer))
+        val presets = listOf(5, 15, 30, 60, 120)
+        val buttons = presets.map { panelButton("${it}m", "$it minutes") }
+        panel.addView(panelButtonRow(buttons), spaced(top = 16))
+
+        fun showDuration(progress: Int) {
+            slider.progress = progress.coerceIn(0, slider.max)
+            val minutes = (slider.progress + 1) * step
+            readout.text = "$minutes min"
+            shorter.isEnabled = slider.progress > 0
+            longer.isEnabled = slider.progress < slider.max
+            presets.zip(buttons).forEach { (preset, button) -> button.isSelected = preset == minutes }
+        }
+
+        val remaining = deadline - SystemClock.elapsedRealtime()
+        val selectedMinutes = if (remaining > 0) ((remaining + 299_999L) / 300_000L).toInt() * step else 30
+        showDuration(selectedMinutes / step - 1)
+        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) showDuration(progress)
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar) = Unit
+        })
+        shorter.setOnClickListener { showDuration(slider.progress - 1) }
+        longer.setOnClickListener { showDuration(slider.progress + 1) }
+        presets.zip(buttons).forEach { (preset, button) ->
+            button.setOnClickListener { showDuration(preset / step - 1) }
+        }
+        val off = panelButton("Turn off", "Turn timer off").apply { isEnabled = remaining > 0 }
+        val start = panelButton(if (remaining > 0) "Reset timer" else "Start timer",
+            if (remaining > 0) "Reset timer" else "Start timer").apply { isSelected = true }
+        panel.addView(panelButtonRow(listOf(off, start)), spaced(top = 12))
+        val dialog = showControlPanel(panel)
+        off.setOnClickListener { timer(0); dialog.dismiss() }
+        start.setOnClickListener { timer((slider.progress + 1) * step); dialog.dismiss() }
     }
 
     private fun timer(minutes: Int?) {
