@@ -21,7 +21,7 @@ internal class ProgressScopeSwitch(
     wholeBook: Boolean,
     private val onScopeChanged: (Boolean) -> Unit
 ) : LinearLayout(context) {
-    private val inset = dp(3)
+    private val inset = dp(4)
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val highlight = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = context.getColor(R.color.player_scope_highlight)
@@ -61,13 +61,13 @@ internal class ProgressScopeSwitch(
         buttonDrawable = null
         background = null
         minimumHeight = dp(48)
-        setPaddingRelative(dp(12), 0, dp(12), 0)
+        setPaddingRelative(dp(8), 0, dp(8), 0)
         val icon = context.getDrawable(iconId)?.mutate()?.apply {
             setTint(context.getColor(R.color.player_muted))
             setBounds(0, 0, dp(17), dp(17))
         }
         setCompoundDrawablesRelative(icon, null, null, null)
-        compoundDrawablePadding = dp(6)
+        compoundDrawablePadding = dp(8)
         setOnClickListener { select(book) }
     }
 

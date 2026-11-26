@@ -49,6 +49,11 @@ class MainActivity : Activity() {
         const val PICK_FOLDER = 10
         const val INSTALL_PERMISSION = 11
         const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+        const val SCREEN_INSET = 20
+        const val DIALOG_INSET = 24
+        const val ROW_INSET = 16
+        const val GAP = 8
+        const val SECTION_GAP = 16
     }
 
     private val background by lazy { getColor(R.color.player_background) }
@@ -237,15 +242,15 @@ class MainActivity : Activity() {
     }
 
     private fun renderLibrary() {
-        val page = column().apply { setPadding(dp(22), dp(24), dp(22), dp(22)) }
+        val page = paddedColumn(SCREEN_INSET)
         root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
         page.addView(label("Local Chapter", 35f, foreground, bold = true))
         page.addView(label("Your audiobook library", 16f, muted))
-        page.addView(button("Settings") { showPlaybackSettings() }, spaced(top = 12))
+        page.addView(button("Settings") { showPlaybackSettings() }, spaced(top = SECTION_GAP))
         page.addView(button(if (importing) "Scanning folder…" else "＋ Import folder", primary = true) { pickFolder() }
-            .apply { isEnabled = !importing }, spaced(top = 22, bottom = 18))
+            .apply { isEnabled = !importing }, spaced(top = GAP))
         updateButton = button("Check for updates") { checkUpdates(manual = true) }.also {
-            page.addView(it, spaced(bottom = 18))
+            page.addView(it, spaced(top = GAP, bottom = SECTION_GAP))
         }
         updateButton?.isEnabled = !updateInProgress
         val books = library.books()
@@ -260,12 +265,12 @@ class MainActivity : Activity() {
                 else "${item.tracks.size} tracks"
             page.addView(button("${item.title}\n$details") { book = item; render() }.apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(17), dp(12), dp(17), dp(12))
+                setPaddingRelative(dp(ROW_INSET), dp(GAP), dp(ROW_INSET), dp(GAP))
                 setOnLongClickListener {
                     confirmDelete(item)
                     true
                 }
-            }, spaced(bottom = 8))
+            }, spaced(bottom = GAP))
         }
     }
 
@@ -278,7 +283,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPlaybackSettings() {
-        val form = column().apply { setPadding(dp(20), dp(8), dp(20), dp(8)) }
+        val form = dialogFields()
         val presets = listOf(10L, 15L, 30L, 60L)
         val customIndex = presets.size
         val current = playbackSettings.skipSeconds
@@ -291,7 +296,7 @@ class MainActivity : Activity() {
                 setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
         }
-        form.addView(interval, spaced(top = 4))
+        form.addView(interval, spaced(top = GAP))
         val custom = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
             contentDescription = "Custom skip seconds"
@@ -310,8 +315,8 @@ class MainActivity : Activity() {
         }
         val fade = settingsSwitch("Fade audio in the final 30 seconds", playbackSettings.fadeTimer)
         val shake = settingsSwitch("Shake to extend at the end of the timer", playbackSettings.shakeTimer)
-        form.addView(fade, spaced(top = 8))
-        form.addView(shake)
+        form.addView(fade, spaced(top = SECTION_GAP))
+        form.addView(shake, spaced(top = GAP))
         val dialog = AlertDialog.Builder(this).setTitle("Playback settings")
             .setView(ScrollView(this).apply { addView(form) })
             .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
@@ -339,7 +344,7 @@ class MainActivity : Activity() {
         text = title
         isChecked = enabled
         minimumHeight = dp(56)
-        switchPadding = dp(12)
+        switchPadding = dp(GAP)
         showText = false
     }
 
@@ -355,14 +360,14 @@ class MainActivity : Activity() {
     }
 
     private fun renderCarMode(selected: Book) {
-        val page = column().apply { setPadding(dp(20), dp(12), dp(20), dp(20)) }
+        val page = paddedColumn(SCREEN_INSET)
         root.addView(ScrollView(this).apply { addView(page) }, LinearLayout.LayoutParams(-1, 0, 1f))
         page.addView(button("Exit Car Mode") { exitCarMode() })
-        page.addView(label(selected.title, 21f, muted, bold = true), spaced(top = 20))
+        page.addView(label(selected.title, 21f, muted, bold = true), spaced(top = SECTION_GAP))
         val chapter = label("", 28f, foreground, bold = true).apply { maxLines = 2 }
-        page.addView(chapter, spaced(top = 4))
+        page.addView(chapter, spaced(top = GAP))
         val detail = label("", 17f, muted)
-        page.addView(detail, spaced(top = 4))
+        page.addView(detail, spaced(top = GAP))
         val progress = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progressTintList = ColorStateList.valueOf(accent)
@@ -375,15 +380,15 @@ class MainActivity : Activity() {
         page.addView(row().apply {
             addView(elapsed, weighted())
             addView(remaining, weighted())
-        }, spaced(bottom = 16))
+        }, spaced(bottom = SECTION_GAP))
         val play = button("Play", primary = true) { toggle(selected) }.apply { textSize = 26f }
         page.addView(play, LinearLayout.LayoutParams(-1, dp(92)))
         val rewind = button("Back ${playbackSettings.skipSeconds}s") { active()?.seekBack() }.apply { textSize = 20f }
         val forward = button("Forward ${playbackSettings.skipSeconds}s") { active()?.seekForward() }.apply { textSize = 20f }
         page.addView(row().apply {
-            addView(rewind, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(6) })
-            addView(forward, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(6) })
-        }, spaced(top = 12))
+            addView(rewind, LinearLayout.LayoutParams(0, dp(72), 1f))
+            addView(forward, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(GAP) })
+        }, spaced(top = GAP))
         carControls = CarControls(chapter, detail, progress, elapsed, remaining, play, rewind, forward)
         if (active() == null) {
             val saved = library.bookmark(selected.id)
@@ -415,7 +420,7 @@ class MainActivity : Activity() {
 
     private fun renderBook(book: Book) {
         val compact = resources.configuration.screenHeightDp < 650 || resources.configuration.fontScale > 1.25f
-        val page = column().apply { setPadding(dp(20), dp(6), dp(20), dp(12)) }
+        val page = paddedColumn(SCREEN_INSET)
         if (compact) root.addView(ScrollView(this).apply { isFillViewport = true; addView(page) },
             LinearLayout.LayoutParams(-1, 0, 1f))
         else root.addView(page, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -430,7 +435,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(dp(8), 0, dp(8), 0)
+                setPaddingRelative(dp(GAP), 0, dp(GAP), 0)
                 minHeight = dp(48)
                 setOnLongClickListener {
                     rename(book)
@@ -448,8 +453,8 @@ class MainActivity : Activity() {
         page.addView(row().apply {
             addView(label("Chapters · ${book.tracks.size}", 14f, muted, bold = true), weighted())
             if (warnings.isNotEmpty()) addView(button("Numbering details") { showWarnings(warnings) }
-                .apply { setPadding(dp(10), 0, dp(10), 0) })
-        }, spaced(top = 12, bottom = 6))
+                .apply { setPaddingRelative(dp(ROW_INSET), 0, dp(ROW_INSET), 0) })
+        }, spaced(top = SECTION_GAP, bottom = GAP))
         val chapters = chapterList(book)
         page.addView(chapters, if (compact) LinearLayout.LayoutParams(-1, dp(190))
             else LinearLayout.LayoutParams(-1, 0, 1f))
@@ -460,7 +465,7 @@ class MainActivity : Activity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        page.addView(chapter, spaced(top = 8))
+        page.addView(chapter, spaced(top = GAP))
 
         val scope = ProgressScopeSwitch(this, playbackSettings.wholeBookProgress) { wholeBook ->
             playbackSettings.wholeBookProgress = wholeBook
@@ -468,8 +473,8 @@ class MainActivity : Activity() {
         }
         val scopeWidth = if (resources.configuration.fontScale > 1.25f) 270 else 232
         page.addView(scope, LinearLayout.LayoutParams(
-            dp(minOf(scopeWidth, resources.configuration.screenWidthDp - 40).coerceAtLeast(1)), -2
-        ).apply { gravity = Gravity.CENTER; topMargin = dp(5) })
+            dp(minOf(scopeWidth, resources.configuration.screenWidthDp - SCREEN_INSET * 2).coerceAtLeast(1)), -2
+        ).apply { gravity = Gravity.CENTER; topMargin = dp(GAP) })
         val progressHint = label("", 13f, muted).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         page.addView(progressHint)
 
@@ -484,7 +489,7 @@ class MainActivity : Activity() {
         val elapsed = label("", 14f, muted)
         val remaining = label("", 14f, muted).apply { gravity = Gravity.END }
         page.addView(row().apply {
-            setPadding(dp(12), 0, dp(12), 0)
+            setPaddingRelative(dp(ROW_INSET), 0, dp(ROW_INSET), 0)
             addView(elapsed, weighted())
             addView(remaining, weighted())
         })
@@ -508,19 +513,19 @@ class MainActivity : Activity() {
             addView(previous, transportSlot())
             addView(rewind, transportSlot())
             addView(play, LinearLayout.LayoutParams(dp(68), dp(60)).apply {
-                marginStart = dp(6)
-                marginEnd = dp(6)
+                marginStart = dp(GAP / 2)
+                marginEnd = dp(GAP / 2)
             })
             addView(forward, transportSlot())
             addView(next, transportSlot())
-        }, spaced(top = 14))
+        }, spaced(top = SECTION_GAP))
 
         val speed = button("Speed") { chooseSpeed() }
         val timer = button("Sleep timer") { chooseTimer() }
         page.addView(row().apply {
-            addView(speed, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-            addView(timer, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
-        }, spaced(top = 12))
+            addView(speed, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(timer, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(GAP) })
+        }, spaced(top = GAP))
 
         controls = Controls(chapter, elapsed, remaining, seek, play, speed, timer, previous, next, rewind, forward,
             chapters, progressHint)
@@ -619,20 +624,20 @@ class MainActivity : Activity() {
         init {
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(52)
-            setPaddingRelative(dp(16), dp(6), dp(16), dp(6))
+            setPaddingRelative(dp(ROW_INSET), dp(GAP), dp(ROW_INSET), dp(GAP))
             background = android.graphics.drawable.StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_activated),
                     android.graphics.drawable.ColorDrawable(selectedSurface))
                 addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
             }
             addView(title, LayoutParams(0, -2, 1f))
-            addView(duration, LayoutParams(-2, -2).apply { marginStart = dp(12) })
+            addView(duration, LayoutParams(-2, -2).apply { marginStart = dp(GAP) })
         }
     }
 
     private fun transportSlot() = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-        marginStart = dp(3)
-        marginEnd = dp(3)
+        marginStart = dp(GAP / 2)
+        marginEnd = dp(GAP / 2)
     }
 
     private fun transportIcon(icon: Int, description: String, primary: Boolean = false, action: () -> Unit) =
@@ -786,14 +791,14 @@ class MainActivity : Activity() {
         val step = 5
         val panel = controlPanel("Playback speed")
         val readout = panelReadout()
-        panel.addView(readout, spaced(bottom = 16))
+        panel.addView(readout, spaced(bottom = SECTION_GAP))
         val slider = panelSlider("Playback speed", (maximum - minimum) / step)
         val slower = panelButton("−", "Decrease speed")
         val faster = panelButton("+", "Increase speed")
         panel.addView(sliderRow(slower, slider, faster))
         val presets = listOf(100 to "1.0", 125 to "1.25", 150 to "1.5", 200 to "2.0", 300 to "3.0")
         val buttons = presets.map { (_, title) -> panelButton(title, "$title times speed") }
-        panel.addView(panelButtonRow(buttons), spaced(top = 16))
+        panel.addView(panelButtonRow(buttons), spaced(top = SECTION_GAP))
 
         fun showSpeed(progress: Int, apply: Boolean) {
             val percent = minimum + progress.coerceIn(0, slider.max) * step
@@ -825,8 +830,7 @@ class MainActivity : Activity() {
         showControlPanel(panel)
     }
 
-    private fun controlPanel(title: String) = column().apply {
-        setPadding(dp(14), dp(18), dp(14), dp(14))
+    private fun controlPanel(title: String) = paddedColumn(DIALOG_INSET).apply {
         background = GradientDrawable().apply {
             setColor(Color.BLACK)
             cornerRadius = dp(20).toFloat()
@@ -857,7 +861,7 @@ class MainActivity : Activity() {
     private fun panelButtonRow(buttons: List<Button>) = row().apply {
         buttons.forEachIndexed { index, button ->
             addView(button, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-                if (index > 0) marginStart = dp(6)
+                if (index > 0) marginStart = dp(GAP)
             })
         }
     }
@@ -871,7 +875,7 @@ class MainActivity : Activity() {
         dialog.show()
         dialog.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            val width = minOf(resources.displayMetrics.widthPixels - dp(24), dp(440))
+            val width = minOf(resources.displayMetrics.widthPixels - dp(DIALOG_INSET * 2), dp(440))
             setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         return dialog
@@ -903,14 +907,14 @@ class MainActivity : Activity() {
         val panel = controlPanel("Sleep timer")
         panel.addView(label("Pause playback in", 14f, 0xFFBBBBBB.toInt()).apply { gravity = Gravity.CENTER })
         val readout = panelReadout()
-        panel.addView(readout, spaced(bottom = 16))
+        panel.addView(readout, spaced(bottom = SECTION_GAP))
         val slider = panelSlider("Timer duration", 119)
         val shorter = panelButton("−", "Decrease timer by five minutes")
         val longer = panelButton("+", "Increase timer by five minutes")
         panel.addView(sliderRow(shorter, slider, longer))
         val presets = listOf(5, 15, 30, 60, 120)
         val buttons = presets.map { panelButton("${it}m", "$it minutes") }
-        panel.addView(panelButtonRow(buttons), spaced(top = 16))
+        panel.addView(panelButtonRow(buttons), spaced(top = SECTION_GAP))
 
         fun showDuration(progress: Int) {
             slider.progress = progress.coerceIn(0, slider.max)
@@ -941,7 +945,7 @@ class MainActivity : Activity() {
             else panelButton("Turn off", "Turn timer off").apply { isEnabled = remaining > 0 }
         val start = panelButton(if (remaining > 0) "Reset timer" else "Start timer",
             if (remaining > 0) "Reset timer" else "Start timer").apply { isSelected = true }
-        panel.addView(panelButtonRow(listOf(off, start)), spaced(top = 12))
+        panel.addView(panelButtonRow(listOf(off, start)), spaced(top = GAP))
         val dialog = showControlPanel(panel)
         off.setOnClickListener { if (canExtend) timer(null, extend = true) else timer(0); dialog.dismiss() }
         start.setOnClickListener { timer(slider.progress + 1); dialog.dismiss() }
@@ -968,7 +972,7 @@ class MainActivity : Activity() {
 
     private fun rename(book: Book) {
         val input = EditText(this).apply { setSingleLine(); setText(book.title); selectAll() }
-        val dialog = AlertDialog.Builder(this).setTitle("Rename book").setView(input)
+        val dialog = AlertDialog.Builder(this).setTitle("Rename book").setView(dialogFields().apply { addView(input) })
             .setPositiveButton("Save", null).setNegativeButton("Cancel", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -1121,9 +1125,16 @@ class MainActivity : Activity() {
     }
 
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    private fun paddedColumn(inset: Int) = column().apply {
+        val padding = dp(inset)
+        setPaddingRelative(padding, padding, padding, padding)
+    }
+    private fun dialogFields() = column().apply {
+        setPaddingRelative(dp(DIALOG_INSET), dp(GAP), dp(DIALOG_INSET), dp(GAP))
+    }
     private fun row() = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     private fun dp(size: Int) = (size * resources.displayMetrics.density + 0.5f).toInt()
-    private fun weighted() = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) }
+    private fun weighted() = LinearLayout.LayoutParams(0, -2, 1f)
     private fun spaced(top: Int = 0, bottom: Int = 0) = LinearLayout.LayoutParams(-1, -2).apply {
         topMargin = dp(top)
         bottomMargin = dp(bottom)
