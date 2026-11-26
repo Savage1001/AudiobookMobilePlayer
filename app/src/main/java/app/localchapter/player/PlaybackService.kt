@@ -223,7 +223,8 @@ class PlaybackService : MediaSessionService() {
                     val book = library.books().find { it.id == args.getString("id") }
                     if (book == null || book.tracks.isEmpty()) SessionResult(SessionError.ERROR_BAD_VALUE)
                     else {
-                        open(book, args.getInt("index", -1), args.getBoolean("play"))
+                        open(book, args.getInt("index", -1), args.getBoolean("play"),
+                            args.getLong("positionMs", 0L).coerceAtLeast(0L))
                         SessionResult(SessionResult.RESULT_SUCCESS)
                     }
                 }
@@ -241,7 +242,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private fun open(book: Book, requestedIndex: Int, play: Boolean) {
+    private fun open(book: Book, requestedIndex: Int, play: Boolean, requestedPosition: Long) {
         if (currentBook?.id != book.id) sleepTimer.clearExtension()
         if (currentBook != book || requestedIndex >= 0) cancelSkips()
         val keepPlaying = currentBook?.id == book.id && player.playWhenReady
@@ -250,7 +251,7 @@ class PlaybackService : MediaSessionService() {
             val bookmark = library.bookmark(book.id)
             val savedIndex = book.tracks.indexOfFirst { it.uri == bookmark.uri }
             val index = if (requestedIndex in book.tracks.indices) requestedIndex else savedIndex.coerceAtLeast(0)
-            val position = if (requestedIndex < 0 && savedIndex >= 0) bookmark.position else 0
+            val position = if (requestedIndex < 0 && savedIndex >= 0) bookmark.position else requestedPosition
             player.pause()
             currentBook = book
             player.setMediaItems(items(book), index, position)
@@ -258,7 +259,7 @@ class PlaybackService : MediaSessionService() {
             player.prepare()
             savePosition()
         } else {
-            if (requestedIndex in book.tracks.indices) player.seekToDefaultPosition(requestedIndex)
+            if (requestedIndex in book.tracks.indices) player.seekTo(requestedIndex, requestedPosition)
             if (player.playbackState == Player.STATE_IDLE) player.prepare()
         }
         if (play || keepPlaying) player.play()

@@ -35,13 +35,15 @@ Each chapter’s length is shown on the right. Tap a chapter to start it, or tap
 
 Skip buttons carry across chapter boundaries. Open **Settings** in the library to set rewind and forward lengths independently. Both default to 30 seconds.
 
+Choose **Chapter** or **Book** above the seek bar to see and scrub through either the current chapter or the full audiobook.
+
 ### Sleep timer
 
 Pick a duration from 1 to 120 minutes and tap **Start timer**. In library **Settings**, you can save a custom preset, turn the 30-second audio fade on or off, and enable **Shake to extend**. When enabled, shake near the end of the timer to restart it for the same duration. You can also tap **Extend** in the timer panel for up to 30 seconds after it ends.
 
 ### Car Mode
 
-Open **⋯ → Car Mode** on the player, or choose **Car Mode** from library **Settings**. The phone screen stays awake and shows large play, pause, rewind, and forward controls.
+Open **⋯ → Car Mode** on the player, or choose **Car Mode** from library **Settings**. The phone screen stays awake and shows large play, pause, rewind, and forward controls, plus a read-only chapter progress bar with elapsed and remaining time.
 
 Playback continues in the background, with controls available through Android’s media notification. On supported Samsung Galaxy devices, turn on **Media player** under **Settings → Lock screen and AOD → Now bar** for lock-screen controls.
 

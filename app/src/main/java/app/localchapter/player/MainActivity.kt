@@ -73,6 +73,9 @@ class MainActivity : Activity() {
     private var book: Book? = null
     private var controls: Controls? = null
     private var dragging = false
+    private var bookTimeline: BookTimeline? = null
+    private var loadingTimeline = false
+    private var carDurationMs = 0L
     private var deadline = 0L
     private var timerCanExtend = false
     private var carMode = false
@@ -94,10 +97,14 @@ class MainActivity : Activity() {
     private data class Controls(
         val chapter: TextView, val elapsed: TextView, val remaining: TextView, val seek: SeekBar,
         val play: android.widget.ImageButton, val speed: Button, val timer: Button,
-        val previous: View, val next: View, val rewind: View, val forward: View, val chapters: ListView
+        val previous: View, val next: View, val rewind: View, val forward: View, val chapters: ListView,
+        val progressHint: TextView
     )
 
-    private data class CarControls(val chapter: TextView, val play: Button, val rewind: Button, val forward: Button)
+    private data class CarControls(
+        val chapter: TextView, val detail: TextView, val progress: android.widget.ProgressBar,
+        val elapsed: TextView, val remaining: TextView, val play: Button, val rewind: Button, val forward: Button
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -189,6 +196,9 @@ class MainActivity : Activity() {
 
     private fun render() {
         chapterDurationTask?.cancel(true)
+        bookTimeline = null
+        loadingTimeline = false
+        carDurationMs = 0L
         dragging = false
         controls = null
         carControls = null
@@ -342,7 +352,22 @@ class MainActivity : Activity() {
         page.addView(button("Exit Car Mode") { exitCarMode() })
         page.addView(label(selected.title, 21f, muted, bold = true), spaced(top = 20))
         val chapter = label("", 28f, foreground, bold = true).apply { maxLines = 2 }
-        page.addView(chapter, spaced(top = 4, bottom = 16))
+        page.addView(chapter, spaced(top = 4))
+        val detail = label("", 17f, muted)
+        page.addView(detail, spaced(top = 4))
+        val progress = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progressTintList = ColorStateList.valueOf(accent)
+            progressBackgroundTintList = ColorStateList.valueOf(border)
+            contentDescription = "Chapter progress"
+        }
+        page.addView(progress, LinearLayout.LayoutParams(-1, dp(16)))
+        val elapsed = label("", 20f, foreground)
+        val remaining = label("", 20f, foreground).apply { gravity = Gravity.END }
+        page.addView(row().apply {
+            addView(elapsed, weighted())
+            addView(remaining, weighted())
+        }, spaced(bottom = 16))
         val play = button("Play", primary = true) { toggle(selected) }.apply { textSize = 26f }
         page.addView(play, LinearLayout.LayoutParams(-1, dp(92)))
         val rewind = button("Back ${playbackSettings.rewindSeconds}s") { active()?.seekBack() }.apply { textSize = 20f }
@@ -351,7 +376,19 @@ class MainActivity : Activity() {
             addView(rewind, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(6) })
             addView(forward, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(6) })
         }, spaced(top = 12))
-        carControls = CarControls(chapter, play, rewind, forward)
+        carControls = CarControls(chapter, detail, progress, elapsed, remaining, play, rewind, forward)
+        if (active() == null) {
+            val saved = library.bookmark(selected.id)
+            val track = selected.tracks.find { it.uri == saved.uri } ?: selected.tracks.firstOrNull()
+            if (track != null) chapterDurationTask = chapterDurationReader.submit {
+                val duration = readTrackDuration(applicationContext, track.uri) ?: return@submit
+                handler.post {
+                    if (isDestroyed || carControls?.progress !== progress) return@post
+                    carDurationMs = duration
+                    updatePlayer()
+                }
+            }
+        }
     }
 
     private fun delete(item: Book) {
@@ -404,8 +441,25 @@ class MainActivity : Activity() {
         }
         page.addView(chapter, spaced(top = 8))
 
+        val scope = android.widget.RadioGroup(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val chapterScope = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Chapter" }
+        val bookScope = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Book" }
+        scope.addView(chapterScope)
+        scope.addView(bookScope)
+        scope.check(if (playbackSettings.wholeBookProgress) bookScope.id else chapterScope.id)
+        scope.setOnCheckedChangeListener { _, id ->
+            playbackSettings.wholeBookProgress = id == bookScope.id
+            updatePlayer()
+        }
+        page.addView(scope)
+        val progressHint = label("", 13f, muted).apply { gravity = Gravity.CENTER; visibility = View.GONE }
+        page.addView(progressHint)
+
         val seek = SeekBar(this).apply {
-            max = 1000
+            max = 100_000
             progressTintList = ColorStateList.valueOf(accent)
             progressBackgroundTintList = ColorStateList.valueOf(border)
             thumbTintList = ColorStateList.valueOf(accent)
@@ -446,17 +500,28 @@ class MainActivity : Activity() {
             addView(timer, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
         }, spaced(top = 12))
 
-        controls = Controls(chapter, elapsed, remaining, seek, play, speed, timer, previous, next, rewind, forward, chapters)
+        controls = Controls(chapter, elapsed, remaining, seek, play, speed, timer, previous, next, rewind, forward,
+            chapters, progressHint)
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(bar: SeekBar) { dragging = true }
             override fun onStopTrackingTouch(bar: SeekBar) {
-                applySeek(bar.progress)
                 dragging = false
+                applySeek(bar)
+                updatePlayer()
             }
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser && !dragging) applySeek(progress)
-                if (fromUser && dragging) active()?.let { player ->
-                    updateTimes(elapsed, remaining, player.duration * progress / 1000, player.duration)
+                if (!fromUser) return
+                if (!dragging) applySeek(bar)
+                else if (playbackSettings.wholeBookProgress) {
+                    bookTimeline?.let { timeline ->
+                        val destination = seekPosition(bar, timeline.durationMs)
+                        updateTimes(elapsed, remaining, destination, timeline.durationMs)
+                        val target = timeline.chapterAt(destination)
+                        chapter.text = book.tracks[target.index].title
+                    }
+                } else active()?.let { player ->
+                    if (player.duration > 0) updateTimes(elapsed, remaining,
+                        seekPosition(bar, player.duration), player.duration)
                 }
             }
         })
@@ -478,6 +543,7 @@ class MainActivity : Activity() {
 
     private fun chapterList(book: Book): ListView {
         val durations = arrayOfNulls<String>(book.tracks.size)
+        loadingTimeline = true
         val list = ListView(this).apply {
             choiceMode = ListView.CHOICE_MODE_SINGLE
             isNestedScrollingEnabled = true
@@ -506,9 +572,11 @@ class MainActivity : Activity() {
             setOnItemClickListener { _, _, index, _ -> open(book, index, true) }
         }
         chapterDurationTask = chapterDurationReader.submit {
+            val durationValues = LongArray(book.tracks.size)
             for ((index, track) in book.tracks.withIndex()) {
-                if (Thread.currentThread().isInterrupted) break
+                if (Thread.currentThread().isInterrupted) return@submit
                 val duration = readTrackDuration(applicationContext, track.uri) ?: continue
+                durationValues[index] = duration
                 val text = time(duration)
                 handler.post {
                     if (isDestroyed) return@post
@@ -516,6 +584,13 @@ class MainActivity : Activity() {
                     val row = list.getChildAt(index - list.firstVisiblePosition) as? ChapterRow
                     if (row?.tag == index) row.duration.text = text
                 }
+            }
+            val timeline = BookTimeline.fromDurations(durationValues)
+            handler.post {
+                if (isDestroyed || controls?.chapters !== list) return@post
+                bookTimeline = timeline
+                loadingTimeline = false
+                updatePlayer()
             }
         }
         return list
@@ -570,8 +645,27 @@ class MainActivity : Activity() {
         if (remaining.text != remainingText) remaining.text = remainingText
     }
 
-    private fun applySeek(progress: Int) {
-        active()?.let { if (it.duration > 0) it.seekTo(it.duration * progress / 1000) }
+    private fun seekPosition(bar: SeekBar, duration: Long): Long =
+        (duration.toDouble() * bar.progress / bar.max).toLong().coerceIn(0L, duration)
+
+    private fun progressValue(position: Long, duration: Long, max: Int): Int =
+        if (duration > 0) (position.coerceIn(0, duration).toDouble() * max / duration).toInt() else 0
+
+    private fun showProgressHint(view: TextView, hint: String?) {
+        view.visibility = if (hint == null) View.GONE else View.VISIBLE
+        if (hint != null && view.text != hint) view.text = hint
+    }
+
+    private fun applySeek(bar: SeekBar) {
+        val player = active()
+        if (playbackSettings.wholeBookProgress) {
+            val timeline = bookTimeline ?: return
+            val target = timeline.chapterAt(seekPosition(bar, timeline.durationMs))
+            if (player != null) player.seekTo(target.index, target.positionMs)
+            else book?.let { open(it, target.index, false, target.positionMs) }
+        } else if (player != null && player.duration > 0) {
+            player.seekTo(seekPosition(bar, player.duration))
+        }
     }
 
     private fun active(): MediaController? {
@@ -599,20 +693,40 @@ class MainActivity : Activity() {
             it.play.isEnabled = controller != null
             it.rewind.isEnabled = duration > 0
             it.forward.isEnabled = duration > 0
+            val chapterDuration = if (player == null) carDurationMs else duration
+            val percent = progressValue(position, chapterDuration, 100)
+            it.progress.progress = percent
+            val detail = if (chapterDuration > 0) "Chapter ${index + 1} of ${selected.tracks.size} · $percent%"
+                else "Chapter ${index + 1} of ${selected.tracks.size}"
+            if (it.detail.text != detail) it.detail.text = detail
+            val elapsed = "${time(position)} elapsed"
+            val remaining = if (chapterDuration > 0) "${time(chapterDuration - position)} left" else "—"
+            if (it.elapsed.text != elapsed) it.elapsed.text = elapsed
+            if (it.remaining.text != remaining) it.remaining.text = remaining
         }
         val views = controls ?: return
-        if (views.chapter.text != title) views.chapter.text = title
+        if ((!dragging || !playbackSettings.wholeBookProgress) && views.chapter.text != title) views.chapter.text = title
         if (views.chapters.checkedItemPosition != index) {
             views.chapters.setItemChecked(index, true)
             if (index !in views.chapters.firstVisiblePosition..views.chapters.lastVisiblePosition) {
                 views.chapters.setSelection(index)
             }
         }
+        val entireBook = playbackSettings.wholeBookProgress
+        val timeline = bookTimeline
         if (!dragging) {
-            updateTimes(views.elapsed, views.remaining, position, duration)
-            views.seek.progress = if (duration > 0) (position * 1000 / duration).toInt() else 0
+            val total = if (entireBook) timeline?.durationMs ?: 0 else duration
+            val elapsed = if (entireBook) timeline?.elapsed(index, position) ?: 0 else position
+            updateTimes(views.elapsed, views.remaining, elapsed, total)
+            views.seek.progress = progressValue(elapsed, total, views.seek.max)
+            showProgressHint(views.progressHint, when {
+                !entireBook || timeline != null -> null
+                loadingTimeline -> "Reading chapter durations…"
+                else -> "Book progress unavailable. Switch to Chapter."
+            })
         }
-        views.seek.isEnabled = duration > 0
+        views.seek.contentDescription = if (entireBook) "Book position" else "Chapter position"
+        views.seek.isEnabled = if (entireBook) timeline != null && controller != null else duration > 0
         views.play.isEnabled = controller != null
         if (views.play.contentDescription != playAction) {
             views.play.contentDescription = playAction
@@ -646,12 +760,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun open(book: Book, index: Int, play: Boolean) {
+    private fun open(book: Book, index: Int, play: Boolean, positionMs: Long = 0L) {
         val player = controller ?: return toast("Playback is connecting")
         player.sendCustomCommand(openBookCommand, Bundle().apply {
             putString("id", book.id)
             putInt("index", index)
             putBoolean("play", play)
+            putLong("positionMs", positionMs)
         })
     }
 

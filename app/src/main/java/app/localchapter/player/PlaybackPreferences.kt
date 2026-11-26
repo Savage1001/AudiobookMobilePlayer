@@ -5,6 +5,10 @@ import android.content.Context
 internal class PlaybackPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("playback", Context.MODE_PRIVATE)
 
+    var wholeBookProgress: Boolean
+        get() = prefs.getBoolean("wholeBookProgress", false)
+        set(value) { prefs.edit().putBoolean("wholeBookProgress", value).apply() }
+
     var rewindSeconds: Int
         get() = prefs.getInt("rewind", 30)
         set(value) { prefs.edit().putInt("rewind", value).apply() }
