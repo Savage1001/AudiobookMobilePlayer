@@ -110,7 +110,7 @@ class MainActivity : Activity() {
 
     private data class CarControls(
         val chapter: TextView, val detail: TextView, val progress: android.widget.ProgressBar,
-        val elapsed: TextView, val remaining: TextView, val play: Button, val rewind: Button, val forward: Button
+        val elapsed: TextView, val remaining: TextView, val play: Button, val rewind: View, val forward: View
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -383,8 +383,8 @@ class MainActivity : Activity() {
         }, spaced(bottom = SECTION_GAP))
         val play = button("Play", primary = true) { toggle(selected) }.apply { textSize = 26f }
         page.addView(play, LinearLayout.LayoutParams(-1, dp(92)))
-        val rewind = button("Back ${playbackSettings.skipSeconds}s") { active()?.seekBack() }.apply { textSize = 20f }
-        val forward = button("Forward ${playbackSettings.skipSeconds}s") { active()?.seekForward() }.apply { textSize = 20f }
+        val rewind = carSkipButton(forward = false) { active()?.seekBack() }
+        val forward = carSkipButton(forward = true) { active()?.seekForward() }
         page.addView(row().apply {
             addView(rewind, LinearLayout.LayoutParams(0, dp(72), 1f))
             addView(forward, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(GAP) })
@@ -402,6 +402,19 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun carSkipButton(forward: Boolean, action: () -> Unit) = android.widget.ImageButton(this).apply {
+        val seconds = playbackSettings.skipSeconds
+        contentDescription = if (forward) "Forward $seconds seconds" else "Back $seconds seconds"
+        scaleType = android.widget.ImageView.ScaleType.CENTER
+        val colors = ColorStateList(
+            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(muted, this@MainActivity.foreground)
+        )
+        setImageDrawable(CarSkipIcon(seconds, forward, dp(48), colors))
+        background = buttonBackground(false)
+        setOnClickListener { action() }
     }
 
     private fun delete(item: Book) {
