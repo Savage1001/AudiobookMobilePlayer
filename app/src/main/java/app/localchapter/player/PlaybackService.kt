@@ -87,8 +87,8 @@ class PlaybackService : MediaSessionService() {
             }
         val launch = Intent(this, MainActivity::class.java).putExtra("showPlaying", true)
         val sessionPlayer = object : ForwardingPlayer(player) {
-            override fun getSeekBackIncrement() = settings.rewindSeconds * 1000L
-            override fun getSeekForwardIncrement() = settings.forwardSeconds * 1000L
+            override fun getSeekBackIncrement() = settings.skipSeconds * 1000L
+            override fun getSeekForwardIncrement() = settings.skipSeconds * 1000L
             override fun seekBack() = skipBy(-seekBackIncrement)
             override fun seekForward() = skipBy(seekForwardIncrement)
         }
@@ -155,8 +155,10 @@ class PlaybackService : MediaSessionService() {
                 if (resolved != null) player.seekTo(resolved.index, resolved.positionMs)
                 else if (player.currentMediaItemIndex == start.index) {
                     val duration = player.duration
-                    val targetMs = (start.positionMs + offset).coerceAtLeast(0L)
-                    player.seekTo(if (duration >= 0) targetMs.coerceAtMost(duration) else targetMs)
+                    val targetMs = (start.positionMs + offset.coerceAtMost(Long.MAX_VALUE - start.positionMs))
+                        .coerceAtLeast(0L)
+                    val seekLimit = if (duration >= 0) duration else Long.MAX_VALUE / 1_000
+                    player.seekTo(targetMs.coerceAtMost(seekLimit))
                 }
                 runNextSkip()
             }

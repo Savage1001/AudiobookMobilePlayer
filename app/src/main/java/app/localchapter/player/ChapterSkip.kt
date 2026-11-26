@@ -7,7 +7,7 @@ internal fun resolveChapterSkip(
     start: ChapterPosition, offsetMs: Long, chapterCount: Int, durationMs: (Int) -> Long?
 ): ChapterPosition? {
     var index = start.index
-    var position = start.positionMs + offsetMs
+    var position = start.positionMs + offsetMs.coerceAtMost(Long.MAX_VALUE - start.positionMs)
     while (position < 0 && index > 0) {
         index--
         position += durationMs(index) ?: return null

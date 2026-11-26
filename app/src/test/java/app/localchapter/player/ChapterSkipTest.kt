@@ -27,6 +27,12 @@ class ChapterSkipTest {
             resolveChapterSkip(ChapterPosition(1, 8_000), -3_000, 3) { null })
     }
 
+    @Test fun veryLargeCustomSkipsClampToBookEnds() {
+        val offset = Long.MAX_VALUE / 1_000 * 1_000
+        assertEquals(ChapterPosition(2, 90_000), skip(0, 350, offset))
+        assertEquals(ChapterPosition(0, 0), skip(2, 90_000, -offset))
+    }
+
     private fun skip(index: Int, position: Long, offset: Long) =
         resolveChapterSkip(ChapterPosition(index, position), offset, durations.size) { durations[it] }
 }
