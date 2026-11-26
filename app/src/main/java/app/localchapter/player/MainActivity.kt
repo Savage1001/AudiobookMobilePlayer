@@ -2,6 +2,7 @@ package app.localchapter.player
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -39,6 +40,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import kotlin.math.roundToInt
 
 class MainActivity : Activity() {
     private companion object {
@@ -526,13 +528,105 @@ class MainActivity : Activity() {
 
     private fun chooseSpeed() {
         val player = active() ?: return toast("Start the book to set playback speed")
-        val choices = listOf(0.5f, 0.75f, 1f, 1.15f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
-        AlertDialog.Builder(this).setTitle("Playback speed")
-            .setSingleChoiceItems(choices.map { "$it×" }.toTypedArray(),
-                choices.indexOf(player.playbackParameters.speed)) { dialog, index ->
-                active()?.setPlaybackSpeed(choices[index])
-                dialog.dismiss()
-            }.setNegativeButton("Cancel", null).show()
+        val minimum = 50
+        val maximum = 300
+        val step = 5
+        val panel = column().apply {
+            setPadding(dp(14), dp(18), dp(14), dp(14))
+            background = GradientDrawable().apply {
+                setColor(Color.BLACK)
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), 0xFF3A3A3A.toInt())
+            }
+            if (Build.VERSION.SDK_INT >= 28) accessibilityPaneTitle = "Playback speed"
+        }
+        val readout = label("", 30f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            fontFeatureSettings = "tnum"
+        }
+        panel.addView(readout, spaced(bottom = 16))
+        val slider = SeekBar(this).apply {
+            max = (maximum - minimum) / step
+            contentDescription = "Playback speed"
+            progressTintList = ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = ColorStateList.valueOf(0xFF777777.toInt())
+            thumbTintList = ColorStateList.valueOf(Color.WHITE)
+        }
+        val slower = speedControl("−", "Decrease speed")
+        val faster = speedControl("+", "Increase speed")
+        panel.addView(row().apply {
+            addView(slower, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(slider, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(faster, LinearLayout.LayoutParams(dp(48), dp(48)))
+        })
+        val presets = listOf(100 to "1.0", 125 to "1.25", 150 to "1.5", 200 to "2.0", 300 to "3.0")
+        val buttons = presets.map { (_, title) -> speedControl(title, "$title times speed") }
+        panel.addView(row().apply {
+            buttons.forEachIndexed { index, button ->
+                addView(button, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                    if (index > 0) marginStart = dp(6)
+                })
+            }
+        }, spaced(top = 16))
+
+        fun showSpeed(progress: Int, apply: Boolean) {
+            val percent = minimum + progress.coerceIn(0, slider.max) * step
+            val speed = percent / 100f
+            slider.progress = (percent - minimum) / step
+            readout.text = String.format(Locale.ROOT, "%.2f×", speed)
+            slower.isEnabled = percent > minimum
+            faster.isEnabled = percent < maximum
+            presets.zip(buttons).forEach { (preset, button) ->
+                button.isSelected = preset.first == percent
+            }
+            if (apply) active()?.setPlaybackSpeed(speed)
+        }
+
+        showSpeed(((player.playbackParameters.speed * 100 - minimum) / step).roundToInt(), apply = false)
+        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) showSpeed(progress, apply = true)
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar) = Unit
+        })
+        slower.setOnClickListener { showSpeed(slider.progress - 1, apply = true) }
+        faster.setOnClickListener { showSpeed(slider.progress + 1, apply = true) }
+        presets.zip(buttons).forEach { (preset, button) ->
+            button.setOnClickListener { showSpeed((preset.first - minimum) / step, apply = true) }
+        }
+
+        val dialog = Dialog(this).apply {
+            requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+            setContentView(panel)
+            setCanceledOnTouchOutside(true)
+        }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            val width = minOf(resources.displayMetrics.widthPixels - dp(24), dp(440))
+            setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+    }
+
+    private fun speedControl(text: String, description: String) = Button(this).apply {
+        this.text = text
+        contentDescription = description
+        textSize = if (text.length == 1) 23f else 14f
+        isAllCaps = false
+        minWidth = 0
+        minimumWidth = 0
+        setPadding(0, 0, 0, 0)
+        stateListAnimator = null
+        val disabled = intArrayOf(-android.R.attr.state_enabled)
+        val selected = intArrayOf(android.R.attr.state_selected)
+        setTextColor(ColorStateList(arrayOf(disabled, selected, intArrayOf()),
+            intArrayOf(0xFF777777.toInt(), Color.BLACK, Color.WHITE)))
+        val fill = GradientDrawable().apply {
+            cornerRadius = dp(24).toFloat()
+            color = ColorStateList(arrayOf(selected, intArrayOf()), intArrayOf(Color.WHITE, 0xFF252525.toInt()))
+        }
+        background = RippleDrawable(ColorStateList.valueOf(0x40777777), fill, null)
     }
 
     private fun chooseTimer() {
