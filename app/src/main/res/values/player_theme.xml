@@ -6,6 +6,7 @@
     <color name="player_muted">#6F6F79</color>
     <color name="player_accent">#1B4ED8</color>
     <color name="player_selected">#E0E6F7</color>
+    <color name="player_scope_highlight">#E8E8EA</color>
     <style name="PlayerTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:colorAccent">@color/player_accent</item>
         <item name="android:windowBackground">@color/player_background</item>

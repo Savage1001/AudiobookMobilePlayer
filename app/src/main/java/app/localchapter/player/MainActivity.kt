@@ -441,20 +441,14 @@ class MainActivity : Activity() {
         }
         page.addView(chapter, spaced(top = 8))
 
-        val scope = android.widget.RadioGroup(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        val chapterScope = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Chapter" }
-        val bookScope = android.widget.RadioButton(this).apply { id = View.generateViewId(); text = "Book" }
-        scope.addView(chapterScope)
-        scope.addView(bookScope)
-        scope.check(if (playbackSettings.wholeBookProgress) bookScope.id else chapterScope.id)
-        scope.setOnCheckedChangeListener { _, id ->
-            playbackSettings.wholeBookProgress = id == bookScope.id
+        val scope = ProgressScopeSwitch(this, playbackSettings.wholeBookProgress) { wholeBook ->
+            playbackSettings.wholeBookProgress = wholeBook
             updatePlayer()
         }
-        page.addView(scope)
+        val scopeWidth = if (resources.configuration.fontScale > 1.25f) 270 else 232
+        page.addView(scope, LinearLayout.LayoutParams(
+            dp(minOf(scopeWidth, resources.configuration.screenWidthDp - 40).coerceAtLeast(1)), -2
+        ).apply { gravity = Gravity.CENTER; topMargin = dp(5) })
         val progressHint = label("", 13f, muted).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         page.addView(progressHint)
 
