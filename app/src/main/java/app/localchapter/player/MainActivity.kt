@@ -1,5 +1,7 @@
 package app.localchapter.player
 
+import android.animation.AnimatorInflater
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
@@ -63,6 +65,9 @@ class MainActivity : Activity() {
     private val muted by lazy { getColor(R.color.player_muted) }
     private val foreground by lazy { getColor(R.color.player_text) }
     private val selectedSurface by lazy { getColor(R.color.player_selected) }
+    private val motionInterpolator by lazy {
+        android.view.animation.AnimationUtils.loadInterpolator(this, android.R.interpolator.fast_out_slow_in)
+    }
     private val handler = Handler(Looper.getMainLooper())
     private val chapterDurationReader = Executors.newSingleThreadExecutor()
     private var chapterDurationTask: Future<*>? = null
@@ -87,6 +92,7 @@ class MainActivity : Activity() {
     private var deadline = 0L
     private var timerCanExtend = false
     private var carMode = false
+    private var shownScreen: Int? = null
     private var carControls: CarControls? = null
     private var importing = false
     private val tick = object : Runnable {
@@ -238,6 +244,18 @@ class MainActivity : Activity() {
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             if (selected == null) renderLibrary() else renderBook(selected)
         }
+        val screen = if (selected == null) 0 else if (carMode) 2 else 1
+        val previousScreen = shownScreen
+        shownScreen = screen
+        if (previousScreen != screen && ValueAnimator.areAnimatorsEnabled()) {
+            val direction = if (root.layoutDirection == View.LAYOUT_DIRECTION_RTL) -1 else 1
+            root.alpha = 0.65f
+            if (previousScreen == null) root.translationY = dp(GAP).toFloat()
+            else root.translationX = (dp(SECTION_GAP) * direction *
+                if (screen > previousScreen) 1 else -1).toFloat()
+            root.animate().alpha(1f).translationX(0f).translationY(0f)
+                .setDuration(220).setInterpolator(motionInterpolator).start()
+        }
         updatePlayer()
         if (inForeground && selected == null && !waitingForInstallPermission) checkUpdates()
     }
@@ -279,7 +297,7 @@ class MainActivity : Activity() {
             .setMessage("Remove “${item.title}” and its saved progress from your library? The audio files will stay on your device.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ -> delete(item) }
-            .show()
+            .create().showWithMotion()
     }
 
     private fun showPlaybackSettings() {
@@ -308,7 +326,14 @@ class MainActivity : Activity() {
         interval.setSelection(presets.indexOf(current).takeIf { it >= 0 } ?: customIndex)
         interval.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                custom.visibility = if (position == customIndex) View.VISIBLE else View.GONE
+                val visibility = if (position == customIndex) View.VISIBLE else View.GONE
+                if (custom.visibility != visibility) {
+                    if (form.isLaidOut && ValueAnimator.areAnimatorsEnabled()) {
+                        android.transition.TransitionManager.beginDelayedTransition(form,
+                            android.transition.AutoTransition().apply { duration = 180 })
+                    }
+                    custom.visibility = visibility
+                }
             }
 
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
@@ -345,7 +370,7 @@ class MainActivity : Activity() {
             }
         }
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
-        dialog.show()
+        dialog.showWithMotion()
     }
 
     private fun settingsSwitch(title: String, enabled: Boolean) = android.widget.Switch(this).apply {
@@ -422,6 +447,7 @@ class MainActivity : Activity() {
         )
         setImageDrawable(CarSkipIcon(seconds, forward, dp(48), colors))
         background = buttonBackground(false)
+        addPressMotion()
         setOnClickListener { action() }
     }
 
@@ -670,6 +696,7 @@ class MainActivity : Activity() {
                 intArrayOf(muted, if (primary) Color.WHITE else this@MainActivity.foreground)
             )
             background = buttonBackground(primary)
+            addPressMotion()
             setOnClickListener { action() }
         }
 
@@ -723,14 +750,14 @@ class MainActivity : Activity() {
             && player.playbackState != Player.STATE_IDLE
         val playAction = if (playing) "Pause" else "Play"
         carControls?.let {
-            if (it.chapter.text != title) it.chapter.text = title
-            if (it.play.text != playAction) it.play.text = playAction
+            updateAnimatedText(it.chapter, title)
+            updateAnimatedText(it.play, playAction)
             it.play.isEnabled = controller != null
             it.rewind.isEnabled = duration > 0
             it.forward.isEnabled = duration > 0
             val chapterDuration = if (player == null) carDurationMs else duration
             val percent = progressValue(position, chapterDuration, 100)
-            it.progress.progress = percent
+            updateProgress(it.progress, percent)
             val detail = if (chapterDuration > 0) "Chapter ${index + 1} of ${selected.tracks.size} · $percent%"
                 else "Chapter ${index + 1} of ${selected.tracks.size}"
             if (it.detail.text != detail) it.detail.text = detail
@@ -740,7 +767,7 @@ class MainActivity : Activity() {
             if (it.remaining.text != remaining) it.remaining.text = remaining
         }
         val views = controls ?: return
-        if ((!dragging || !playbackSettings.wholeBookProgress) && views.chapter.text != title) views.chapter.text = title
+        if (!dragging || !playbackSettings.wholeBookProgress) updateAnimatedText(views.chapter, title)
         if (views.chapters.checkedItemPosition != index) {
             views.chapters.setItemChecked(index, true)
             if (index !in views.chapters.firstVisiblePosition..views.chapters.lastVisiblePosition) {
@@ -753,7 +780,7 @@ class MainActivity : Activity() {
             val total = if (entireBook) timeline?.durationMs ?: 0 else duration
             val elapsed = if (entireBook) timeline?.elapsed(index, position) ?: 0 else position
             updateTimes(views.elapsed, views.remaining, elapsed, total)
-            views.seek.progress = progressValue(elapsed, total, views.seek.max)
+            updateProgress(views.seek, progressValue(elapsed, total, views.seek.max))
             showProgressHint(views.progressHint, when {
                 !entireBook || timeline != null -> null
                 loadingTimeline -> "Reading chapter durations…"
@@ -766,6 +793,7 @@ class MainActivity : Activity() {
         if (views.play.contentDescription != playAction) {
             views.play.contentDescription = playAction
             views.play.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+            fadeInChangedContent(views.play)
         }
         val speedText = "Speed · ${player?.playbackParameters?.speed ?: saved?.speed ?: 1f}×"
         if (views.speed.text != speedText) views.speed.text = speedText
@@ -893,7 +921,7 @@ class MainActivity : Activity() {
             setContentView(panel)
             setCanceledOnTouchOutside(true)
         }
-        dialog.show()
+        dialog.showWithMotion()
         dialog.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
             val width = minOf(resources.displayMetrics.widthPixels - dp(DIALOG_INSET * 2), dp(440))
@@ -910,7 +938,7 @@ class MainActivity : Activity() {
         minWidth = 0
         minimumWidth = 0
         setPadding(0, 0, 0, 0)
-        stateListAnimator = null
+        addPressMotion()
         val disabled = intArrayOf(-android.R.attr.state_enabled)
         val selected = intArrayOf(android.R.attr.state_selected)
         setTextColor(ColorStateList(arrayOf(disabled, selected, intArrayOf()),
@@ -1009,7 +1037,7 @@ class MainActivity : Activity() {
                 }
             }
         }
-        dialog.show()
+        dialog.showWithMotion()
     }
 
     private fun checkUpdates(manual: Boolean = false, installAfterCheck: Boolean = false) {
@@ -1032,7 +1060,7 @@ class MainActivity : Activity() {
                             .setTitle("Local Chapter ${release.tag} is available")
                             .setMessage("Download the update from GitHub and confirm installation in Android.")
                             .setPositiveButton("Download update") { _, _ -> downloadUpdate(release) }
-                            .setNegativeButton("Later", null).show()
+                            .setNegativeButton("Later", null).create().showWithMotion()
                     }
                 }.onFailure { if (manual) toast("Could not check GitHub for updates. Try again later.") }
             }
@@ -1054,7 +1082,7 @@ class MainActivity : Activity() {
                         waitingForInstallPermission = false
                         toast("Could not open Android's install settings")
                     }
-                }.setNegativeButton("Cancel", null).show()
+                }.setNegativeButton("Cancel", null).create().showWithMotion()
             return
         }
         setUpdateBusy(true, downloading = true)
@@ -1143,10 +1171,40 @@ class MainActivity : Activity() {
     private fun showWarnings(warnings: List<String>) {
         AlertDialog.Builder(this).setTitle("Track numbering")
             .setMessage(warnings.joinToString("\n\n") + "\n\nAll matching tracks are included.")
-            .setPositiveButton("OK", null).show()
+            .setPositiveButton("OK", null).create().showWithMotion()
     }
 
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+    private fun Dialog.showWithMotion() {
+        window?.setWindowAnimations(if (ValueAnimator.areAnimatorsEnabled()) R.style.DialogMotion else 0)
+        show()
+    }
+
+    private fun View.addPressMotion() {
+        stateListAnimator = AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.button_press)
+    }
+
+    private fun fadeInChangedContent(view: View) {
+        if (!view.isLaidOut || !ValueAnimator.areAnimatorsEnabled()) return
+        view.animate().cancel()
+        view.alpha = 0.6f
+        view.animate().alpha(1f).setDuration(150).setInterpolator(motionInterpolator).start()
+    }
+
+    private fun updateAnimatedText(view: TextView, text: String) {
+        if (view.text == text) return
+        view.text = text
+        fadeInChangedContent(view)
+    }
+
+    private fun updateProgress(bar: android.widget.ProgressBar, progress: Int) {
+        val delta = progress - bar.progress
+        if (delta != 0) {
+            val animate = delta > 0 && delta <= bar.max / 50 && ValueAnimator.areAnimatorsEnabled()
+            bar.setProgress(progress, animate)
+        }
+    }
     private fun paddedColumn(inset: Int) = column().apply {
         val padding = dp(inset)
         setPaddingRelative(padding, padding, padding, padding)
@@ -1181,6 +1239,7 @@ class MainActivity : Activity() {
             intArrayOf(muted, if (primary) Color.WHITE else this@MainActivity.foreground)
         ))
         background = buttonBackground(primary)
+        addPressMotion()
         setOnClickListener { action() }
     }
 
