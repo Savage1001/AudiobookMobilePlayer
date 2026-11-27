@@ -87,6 +87,7 @@ class MainActivity : Activity() {
     private var controls: Controls? = null
     private var dragging = false
     private var bookTimeline: BookTimeline? = null
+    private var chapterDurations = LongArray(0)
     private var loadingTimeline = false
     private var carDurationMs = 0L
     private var deadline = 0L
@@ -211,6 +212,7 @@ class MainActivity : Activity() {
     private fun render() {
         chapterDurationTask?.cancel(true)
         bookTimeline = null
+        chapterDurations = LongArray(0)
         loadingTimeline = false
         carDurationMs = 0L
         dragging = false
@@ -593,9 +595,11 @@ class MainActivity : Activity() {
                         val target = timeline.chapterAt(destination)
                         chapter.text = book.tracks[target.index].title
                     }
-                } else active()?.let { player ->
-                    if (player.duration > 0) updateTimes(elapsed, remaining,
-                        seekPosition(bar, player.duration), player.duration)
+                } else {
+                    val player = active()
+                    val index = player?.currentMediaItemIndex ?: savedChapterIndex(book)
+                    val duration = chapterDuration(index, player)
+                    if (duration > 0) updateTimes(elapsed, remaining, seekPosition(bar, duration), duration)
                 }
             }
         })
@@ -603,7 +607,8 @@ class MainActivity : Activity() {
 
 
     private fun chapterList(book: Book): ListView {
-        val durations = arrayOfNulls<String>(book.tracks.size)
+        val durations = LongArray(book.tracks.size)
+        chapterDurations = durations
         loadingTimeline = true
         val list = ListView(this).apply {
             choiceMode = ListView.CHOICE_MODE_SINGLE
@@ -626,24 +631,29 @@ class MainActivity : Activity() {
                     return ((convertView as? ChapterRow) ?: ChapterRow()).apply {
                         tag = position
                         title.text = "${track.filename.substringBefore(" - ")}    ${track.title}"
-                        duration.text = durations[position] ?: "—"
+                        duration.text = durations[position].takeIf { it > 0 }?.let(::time) ?: "—"
                     }
                 }
             }
             setOnItemClickListener { _, _, index, _ -> open(book, index, true) }
         }
+        val current = active()?.currentMediaItemIndex ?: savedChapterIndex(book)
         chapterDurationTask = chapterDurationReader.submit {
             val durationValues = LongArray(book.tracks.size)
-            for ((index, track) in book.tracks.withIndex()) {
+            // Load the chapter being displayed before scanning the rest of a long book.
+            val prioritized = sequenceOf(current).filter { it in book.tracks.indices } +
+                book.tracks.indices.asSequence().filter { it != current }
+            for (index in prioritized) {
                 if (Thread.currentThread().isInterrupted) return@submit
-                val duration = readTrackDuration(applicationContext, track.uri) ?: continue
+                val duration = readTrackDuration(applicationContext, book.tracks[index].uri) ?: continue
                 durationValues[index] = duration
                 val text = time(duration)
                 handler.post {
-                    if (isDestroyed) return@post
-                    durations[index] = text
+                    if (isDestroyed || controls?.chapters !== list) return@post
+                    durations[index] = duration
                     val row = list.getChildAt(index - list.firstVisiblePosition) as? ChapterRow
                     if (row?.tag == index) row.duration.text = text
+                    if (index == current) updatePlayer()
                 }
             }
             val timeline = BookTimeline.fromDurations(durationValues)
@@ -725,10 +735,21 @@ class MainActivity : Activity() {
             val target = timeline.chapterAt(seekPosition(bar, timeline.durationMs))
             if (player != null) player.seekTo(target.index, target.positionMs)
             else book?.let { open(it, target.index, false, target.positionMs) }
-        } else if (player != null && player.duration > 0) {
-            player.seekTo(seekPosition(bar, player.duration))
+        } else {
+            val selected = book ?: return
+            val index = player?.currentMediaItemIndex ?: savedChapterIndex(selected)
+            val duration = chapterDuration(index, player)
+            if (duration <= 0) return
+            val position = seekPosition(bar, duration)
+            if (player != null) player.seekTo(position) else open(selected, index, false, position)
         }
     }
+
+    private fun savedChapterIndex(selected: Book, bookmark: Bookmark = library.bookmark(selected.id)): Int =
+        selected.tracks.indexOfFirst { it.uri == bookmark.uri }.coerceAtLeast(0)
+
+    private fun chapterDuration(index: Int, player: MediaController?): Long =
+        player?.duration?.takeIf { it > 0 } ?: chapterDurations.getOrElse(index) { 0L }
 
     private fun active(): MediaController? {
         val current = controller ?: return null
@@ -741,11 +762,10 @@ class MainActivity : Activity() {
         val selected = book ?: return
         val player = active()
         val saved = if (player == null) library.bookmark(selected.id) else null
-        val index = player?.currentMediaItemIndex
-            ?: selected.tracks.indexOfFirst { it.uri == saved?.uri }.coerceAtLeast(0)
+        val index = player?.currentMediaItemIndex ?: saved?.let { savedChapterIndex(selected, it) } ?: 0
         val title = selected.tracks.getOrNull(index)?.title.orEmpty()
         val position = player?.currentPosition ?: saved?.position ?: 0
-        val duration = player?.duration ?: 0
+        val duration = chapterDuration(index, player)
         val playing = player?.playWhenReady == true && player.playbackState != Player.STATE_ENDED
             && player.playbackState != Player.STATE_IDLE
         val playAction = if (playing) "Pause" else "Play"
@@ -753,8 +773,8 @@ class MainActivity : Activity() {
             updateAnimatedText(it.chapter, title)
             updateAnimatedText(it.play, playAction)
             it.play.isEnabled = controller != null
-            it.rewind.isEnabled = duration > 0
-            it.forward.isEnabled = duration > 0
+            it.rewind.isEnabled = player != null && duration > 0
+            it.forward.isEnabled = player != null && duration > 0
             val chapterDuration = if (player == null) carDurationMs else duration
             val percent = progressValue(position, chapterDuration, 100)
             updateProgress(it.progress, percent)
@@ -778,8 +798,12 @@ class MainActivity : Activity() {
         val timeline = bookTimeline
         if (!dragging) {
             val total = if (entireBook) timeline?.durationMs ?: 0 else duration
-            val elapsed = if (entireBook) timeline?.elapsed(index, position) ?: 0 else position
-            updateTimes(views.elapsed, views.remaining, elapsed, total)
+            val elapsed = if (entireBook) timeline?.elapsed(index, position) ?: position else position
+            if (entireBook && timeline == null) {
+                if (views.elapsed.text != "—") views.elapsed.text = "—"
+                if (views.remaining.text != "—") views.remaining.text = "—"
+            } else updateTimes(views.elapsed, views.remaining, elapsed, total)
+            views.seek.visibility = if (total > 0 || (!entireBook && position == 0L)) View.VISIBLE else View.INVISIBLE
             updateProgress(views.seek, progressValue(elapsed, total, views.seek.max))
             showProgressHint(views.progressHint, when {
                 !entireBook || timeline != null -> null
@@ -788,7 +812,7 @@ class MainActivity : Activity() {
             })
         }
         views.seek.contentDescription = if (entireBook) "Book position" else "Chapter position"
-        views.seek.isEnabled = if (entireBook) timeline != null && controller != null else duration > 0
+        views.seek.isEnabled = controller != null && if (entireBook) timeline != null else duration > 0
         views.play.isEnabled = controller != null
         if (views.play.contentDescription != playAction) {
             views.play.contentDescription = playAction
@@ -806,8 +830,8 @@ class MainActivity : Activity() {
         if (views.timer.text != timerText) views.timer.text = timerText
         views.previous.isEnabled = player?.hasPreviousMediaItem() == true
         views.next.isEnabled = player?.hasNextMediaItem() == true
-        views.rewind.isEnabled = duration > 0
-        views.forward.isEnabled = duration > 0
+        views.rewind.isEnabled = player != null && duration > 0
+        views.forward.isEnabled = player != null && duration > 0
     }
 
     private fun toggle(book: Book) {
